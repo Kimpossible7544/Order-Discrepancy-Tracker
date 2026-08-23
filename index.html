@@ -582,11 +582,16 @@ function importCSV(event) {
     const lines = text.split(/\r?\n/).filter(l => l.trim().length);
     if (lines.length < 2) return;
     const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+    if (entries.length && !confirm('Importing replaces the ' + entries.length + ' entries currently loaded. Continue?')) {
+      event.target.value = '';
+      return;
+    }
+    const imported = [];
     for (let i = 1; i < lines.length; i++) {
       const vals = parseCSVLine(lines[i]);
       const obj = {};
       headers.forEach((h, idx) => obj[h] = vals[idx] || '');
-      entries.push({
+      imported.push({
         date: obj.date || '',
         site: obj.site || '',
         order: obj.orderplaced || obj.order || '',
@@ -600,8 +605,10 @@ function importCSV(event) {
         notes: obj.notes || '',
       });
     }
+    entries = imported;
     saveData();
     render();
+    setSourceStatus('Loaded ' + imported.length + ' rows from ' + file.name + '.', 'ok');
     event.target.value = '';
   };
   reader.readAsText(file);
