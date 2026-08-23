@@ -6,6 +6,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
   :root {
     --bg: #0b0f17;
@@ -112,6 +113,11 @@
   .file-btn { position: relative; overflow: hidden; }
   .file-btn input[type=file] { position: absolute; left: 0; top: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
   .table-scroll { overflow-x: auto; }
+  .source-row { align-items: flex-end; margin-bottom: 0; }
+  .source-row .field { flex: 1; min-width: 260px; }
+  .status { font-size: 12px; color: var(--text-dim); margin: 12px 0 0; min-height: 16px; }
+  .status.ok { color: var(--teal); }
+  .status.error { color: var(--red); }
 
   @media (max-width: 720px) {
     .charts { grid-template-columns: 1fr; }
@@ -125,6 +131,19 @@
 <p class="eyebrow">Radiology IT · Discrepancy tracking</p>
 <h1>Order discrepancy pattern dashboard</h1>
 <p class="sub">Order/protocol discrepancy log across 11 sites</p>
+
+<div class="panel">
+  <h2>Workbook source</h2>
+  <div class="row source-row">
+    <div class="field">
+      <label>Dropbox shared link to Discrepancy_Tracker.xlsm</label>
+      <input type="url" id="f-link" placeholder="https://www.dropbox.com/scl/fi/.../Discrepancy_Tracker.xlsm?rlkey=..." spellcheck="false">
+    </div>
+    <button onclick="loadFromDropbox()">Load from Dropbox</button>
+    <button class="secondary file-btn">Open local workbook<input type="file" accept=".xlsm,.xlsx,.xlsb,.xls" onchange="importWorkbookFile(event)"></button>
+  </div>
+  <p class="status" id="source-status" role="status"></p>
+</div>
 
 <div class="stats" id="stats"></div>
 
@@ -218,6 +237,119 @@
 </div>
 <script>
 let entries = [];
+
+const LINK_KEY = 'discrepancy-dropbox-link';
+const LOG_SHEET = 'Log';
+
+function setSourceStatus(msg, kind) {
+  const el = document.getElementById('source-status');
+  el.textContent = msg || '';
+  el.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+// Dropbox share links serve an HTML preview by default. The dl.dropboxusercontent.com
+// host with raw=1 serves the file bytes and allows cross-origin reads.
+function toDirectDropboxUrl(raw) {
+  const url = new URL(raw.trim());
+  if (!/(^|\.)dropbox(usercontent)?\.com$/.test(url.hostname)) {
+    throw new Error('That is not a Dropbox link.');
+  }
+  url.hostname = 'dl.dropboxusercontent.com';
+  url.searchParams.delete('dl');
+  url.searchParams.delete('st');
+  url.searchParams.set('raw', '1');
+  return url.toString();
+}
+
+async function loadFromDropbox() {
+  const link = document.getElementById('f-link').value.trim();
+  if (!link) { setSourceStatus('Paste a Dropbox shared link first.', 'error'); return; }
+  let direct;
+  try { direct = toDirectDropboxUrl(link); }
+  catch (err) { setSourceStatus(err.message, 'error'); return; }
+
+  setSourceStatus('Downloading workbook…');
+  try {
+    const res = await fetch(direct, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Dropbox returned ' + res.status);
+    const buf = await res.arrayBuffer();
+    const count = applyWorkbook(buf);
+    localStorage.setItem(LINK_KEY, link);
+    setSourceStatus('Loaded ' + count + ' rows from Dropbox at ' + new Date().toLocaleTimeString() + '.', 'ok');
+  } catch (err) {
+    setSourceStatus('Could not load the workbook (' + err.message + '). The link must be shared as ' +
+      '"Anyone with the link — can view". You can also open a local copy instead.', 'error');
+  }
+}
+
+function importWorkbookFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const count = applyWorkbook(e.target.result);
+      setSourceStatus('Loaded ' + count + ' rows from ' + file.name + '.', 'ok');
+    } catch (err) {
+      setSourceStatus('Could not read ' + file.name + ' (' + err.message + ').', 'error');
+    }
+    event.target.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Replaces the entry list with the workbook's Log sheet, which is the source of truth.
+function applyWorkbook(data) {
+  const book = XLSX.read(data, { type: 'array', cellDates: true });
+  const sheetName = book.SheetNames.includes(LOG_SHEET)
+    ? LOG_SHEET
+    : book.SheetNames.find(n => n.toLowerCase() === LOG_SHEET.toLowerCase());
+  if (!sheetName) throw new Error('no "' + LOG_SHEET + '" sheet in the workbook');
+
+  const rows = XLSX.utils.sheet_to_json(book.Sheets[sheetName], { defval: '', blankrows: false });
+  const mapped = rows.map(rowToEntry).filter(e => e.site || e.order || e.corrected);
+  entries = mapped;
+  saveData();
+  render();
+  return mapped.length;
+}
+
+function pick(row, names) {
+  for (const key of Object.keys(row)) {
+    const norm = key.trim().toLowerCase();
+    if (names.some(n => norm === n || norm.startsWith(n))) return row[key];
+  }
+  return '';
+}
+
+function rowToEntry(row) {
+  const charge = String(pick(row, ['charge impact', 'charge']) || 'Unknown').trim();
+  const rawCause = String(pick(row, ['root cause']) || 'Other').trim();
+  const detail = String(pick(row, ['root cause detail']) || '').trim();
+  return {
+    date: toDateString(pick(row, ['date'])),
+    site: String(pick(row, ['site']) || '').trim(),
+    order: String(pick(row, ['order as placed', 'order placed', 'order']) || '').trim(),
+    corrected: String(pick(row, ['corrected to', 'corrected']) || '').trim(),
+    dept: String(pick(row, ['ordering department', 'department', 'dept']) || '').trim(),
+    category: String(pick(row, ['discrepancy category', 'category']) || 'Other').trim(),
+    charge: ['Yes', 'No', 'Unknown'].includes(charge) ? charge : 'Unknown',
+    cause: rawCause || 'Other',
+    causeDetail: detail,
+    time: String(pick(row, ['resolution time']) ?? '').trim(),
+    notes: String(pick(row, ['notes']) || '').trim(),
+  };
+}
+
+function toDateString(value) {
+  if (value instanceof Date && !isNaN(value)) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return value.getFullYear() + '-' + pad(value.getMonth() + 1) + '-' + pad(value.getDate());
+  }
+  const text = String(value || '').trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : text;
+}
 
 function loadData() {
   try {
@@ -450,11 +582,16 @@ function importCSV(event) {
     const lines = text.split(/\r?\n/).filter(l => l.trim().length);
     if (lines.length < 2) return;
     const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+    if (entries.length && !confirm('Importing replaces the ' + entries.length + ' entries currently loaded. Continue?')) {
+      event.target.value = '';
+      return;
+    }
+    const imported = [];
     for (let i = 1; i < lines.length; i++) {
       const vals = parseCSVLine(lines[i]);
       const obj = {};
       headers.forEach((h, idx) => obj[h] = vals[idx] || '');
-      entries.push({
+      imported.push({
         date: obj.date || '',
         site: obj.site || '',
         order: obj.orderplaced || obj.order || '',
@@ -468,8 +605,10 @@ function importCSV(event) {
         notes: obj.notes || '',
       });
     }
+    entries = imported;
     saveData();
     render();
+    setSourceStatus('Loaded ' + imported.length + ' rows from ' + file.name + '.', 'ok');
     event.target.value = '';
   };
   reader.readAsText(file);
@@ -494,6 +633,12 @@ function parseCSVLine(line) {
 }
 
 loadData();
+
+const savedLink = localStorage.getItem(LINK_KEY);
+if (savedLink) {
+  document.getElementById('f-link').value = savedLink;
+  loadFromDropbox();
+}
 </script>
 </body>
 </html>
