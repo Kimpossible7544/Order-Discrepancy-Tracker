@@ -165,6 +165,24 @@
 
 <div class="stats" id="stats"></div>
 
+<div class="panel" id="entered-panel">
+  <div class="toolbar" style="margin-bottom:16px;">
+    <h2>Who entered the order</h2>
+  </div>
+  <div class="table-scroll" id="enteredWrap"></div>
+  <div class="chart-box" id="dept-entered-box" style="margin-top:20px;"><canvas id="chartDeptEntered" role="img" aria-label="Top departments split by who entered the order"></canvas></div>
+  <p class="hint" style="margin-bottom:0;">Click a row or bar segment to filter the whole page to it.</p>
+</div>
+
+<div class="panel" id="phone-panel">
+  <div class="toolbar" style="margin-bottom:8px;">
+    <h2>Phone numbers</h2>
+    <input type="text" id="phone-search" placeholder="Search number…" oninput="renderPhones(getView())" style="width:200px;">
+  </div>
+  <p class="hint">Most-used ordering numbers first (top 25; searching shows every match). Click a row to filter the whole page to that number.</p>
+  <div class="table-scroll" id="phoneWrap"></div>
+</div>
+
 <div class="panel" id="explore">
   <div class="toolbar" style="margin-bottom:16px;">
     <h2>Explore</h2>
@@ -185,6 +203,7 @@
       <select id="filter-value"></select>
     </div>
     <button class="secondary" onclick="addFilterFromControls()">Add filter</button>
+    <button class="secondary" id="clear-filters-btn" onclick="clearFilters()">Clear all filters</button>
   </div>
   <div class="chips" id="filter-chips"></div>
   <p class="hint">Click a bar or a row below to filter to that value. Filters apply to every stat, chart, and table on the page.</p>
@@ -605,6 +624,8 @@ function escapeHtml(s) {
 function render() {
   const view = getView();
   renderStats(view);
+  renderEntered(view);
+  renderPhones(view);
   renderExplore(view);
   renderTable(view);
   renderCharts(view);
@@ -715,8 +736,12 @@ function renderExplore(view) {
     chipsEl.innerHTML = activeFilters.map((f, i) => {
       const d = dimByKey(f.key);
       return `<span class="chip"><b>${escapeHtml(d ? d.label : f.key)}:</b> ${escapeHtml(f.value)}<button title="Remove filter" onclick="removeFilter(${i})">×</button></span>`;
-    }).join('') + '<button class="link-btn" onclick="clearFilters()">Clear all</button>';
+    }).join('');
   }
+  const clearBtn = document.getElementById('clear-filters-btn');
+  clearBtn.disabled = !activeFilters.length;
+  clearBtn.style.opacity = activeFilters.length ? '1' : '0.4';
+  clearBtn.style.cursor = activeFilters.length ? 'pointer' : 'default';
 
   document.getElementById('view-count').textContent = `Showing ${view.length} of ${entries.length}`;
 
