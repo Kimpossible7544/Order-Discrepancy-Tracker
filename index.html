@@ -392,17 +392,18 @@ function clearFilters() { activeFilters = []; render(); }
 const ALIASES = {
   date: 'date',
   site: 'site',
-  orderplaced: 'order', orderasplaced: 'order', order: 'order',
+  orderplaced: 'order', orderasplaced: 'order', orderedas: 'order', order: 'order',
   correctedto: 'corrected', corrected: 'corrected',
   department: 'dept', orderingdepartment: 'dept', orderingdept: 'dept', dept: 'dept',
-  category: 'category', discrepancycategory: 'category',
-  chargeimpact: 'charge', charge: 'charge',
+  category: 'category', discrepancycategory: 'category', reason: 'category',
+  chargeimpact: 'charge', chargediscrepancy: 'charge', charge: 'charge',
+  deid: '_ignore',
   rootcause: 'cause', cause: 'cause',
   rootcausedetail: 'causeDetail', rootcausedetailifother: 'causeDetail', causedetail: 'causeDetail', otherdetail: 'causeDetail',
   resolutiontimemin: 'time', resolutiontime: 'time', resolutiontimeminutes: 'time', time: 'time',
   notes: 'notes',
   schedulingissue: 'schedReason', schedulingreason: 'schedReason',
-  schedulingissuedetail: 'schedReasonDetail', schedulingissuedetails: 'schedReasonDetail', schedulingreasondetail: 'schedReasonDetail',
+  schedulingissuedetail: 'schedReasonDetail', schedulingissuedetails: 'schedReasonDetail', schedulingreasondetail: 'schedReasonDetail', schedulingissuedetailifother: 'schedReasonDetail',
   orderedby: 'orderedBy', orderenteredby: 'orderedBy', enteredby: 'orderedBy',
 };
 
@@ -425,6 +426,7 @@ function mapRow(headers, r) {
   headers.forEach((h, idx) => {
     const v = r[idx];
     const field = fieldFor(normKey(h));
+    if (field === '_ignore') return;
     if (field === 'date') e.date = excelDateToISO(v);
     else if (field) e[field] = String(v ?? '').trim();
     else if (h && String(v ?? '').trim()) e.extra[h] = String(v).trim();
@@ -606,7 +608,32 @@ function render() {
   renderExplore(view);
   renderTable(view);
   renderCharts(view);
+  renderRepeats(view);
   updateLists();
+}
+
+function renderRepeats(view) {
+  const wrap = document.getElementById('repeatWrap');
+  const groups = {};
+  view.forEach(e => {
+    if (!e.order || !e.corrected) return;
+    const dept = e.dept || '(blank)';
+    const k = dept + '||' + e.order + '||' + e.corrected;
+    if (!groups[k]) groups[k] = { dept, pair: `${e.order} → ${e.corrected}`, count: 0, yes: 0, last: '' };
+    groups[k].count++;
+    if (e.charge === 'Yes') groups[k].yes++;
+    if (e.date > groups[k].last) groups[k].last = e.date;
+  });
+  const rows = Object.values(groups).filter(g => g.count >= 3).sort((a,b) => b.count - a.count);
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">No repeats yet (needs 3+ of the same department + order pair).</div>'; return; }
+  wrap.innerHTML = `<table>
+    <tr><th>Department</th><th>Order pair</th><th>Count</th><th>Charge-impacting</th><th>Most recent</th></tr>
+    ${rows.map(g => `<tr>
+      <td>${escapeHtml(g.dept)}</td><td>${escapeHtml(g.pair)}</td>
+      <td class="num">${g.count}</td><td class="num ${g.yes ? 'yes' : 'no'}">${g.yes}</td>
+      <td class="num">${escapeHtml(g.last)}</td>
+    </tr>`).join('')}
+  </table>`;
 }
 
 function setDatalist(id, values) {
@@ -628,10 +655,24 @@ function renderStats(view) {
   const sites = new Set(view.map(e => e.site).filter(Boolean)).size;
   const topCat = topOf(view.map(e => e.category).filter(Boolean));
 
+  const times = view.map(e => parseFloat(e.time)).filter(n => !isNaN(n));
+  const avgTime = times.length ? (times.reduce((a,b) => a+b, 0) / times.length).toFixed(1) : null;
+
+  let rateCard = '';
+  const volDays = Object.keys(volumes);
+  if (volDays.length) {
+    const reviewed = volDays.reduce((s, d) => s + volumes[d], 0);
+    const errs = view.filter(e => volumes[e.date]).length;
+    const rate = reviewed ? (errs / reviewed * 100).toFixed(2) : '0.00';
+    rateCard = `<div class="stat warn"><div class="label">Error rate</div><div class="value">${rate}%<span style="font-size:14px;color:var(--text-faint);"> of ${reviewed.toLocaleString()}</span></div></div>`;
+  }
+
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="label">Total logged</div><div class="value">${total}</div></div>
     <div class="stat warn"><div class="label">Charge-impacting</div><div class="value">${chargeImpact}<span style="font-size:14px;color:var(--text-faint);"> / ${chargePct}%</span></div></div>
+    ${rateCard}
     <div class="stat"><div class="label">Sites represented</div><div class="value">${sites}</div></div>
+    <div class="stat"><div class="label">Avg resolution</div><div class="value">${avgTime ?? '—'}${avgTime ? '<span style="font-size:14px;color:var(--text-faint);"> min</span>' : ''}</div></div>
     <div class="stat"><div class="label">Top category</div><div class="value small">${escapeHtml(topCat || '—')}</div></div>
   `;
 }
@@ -771,7 +812,7 @@ function renderTable(view) {
   </table>`;
 }
 
-let chartCat, chartSite, chartCharge, chartCause, chartOrderedBy, chartPairs, chartTrend;
+let chartCat, chartSite, chartCharge, chartCause, chartOrderedBy, chartPairs, chartTrend, chartResTime, chartDow;
 function renderCharts(view) {
   const catCounts = {};
   const siteCounts = {};
@@ -780,8 +821,20 @@ function renderCharts(view) {
   const orderedByCounts = {};
   const pairCounts = {};
   const weekCounts = {};
+  const timeByCat = {}; // { category: [sum, n] }
+  const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const dowCounts = [0,0,0,0,0,0,0];
 
   view.forEach(e => {
+    const t = parseFloat(e.time);
+    if (!isNaN(t) && e.category) {
+      if (!timeByCat[e.category]) timeByCat[e.category] = [0, 0];
+      timeByCat[e.category][0] += t; timeByCat[e.category][1]++;
+    }
+    if (e.date) {
+      const dd = new Date(e.date + 'T00:00:00');
+      if (!isNaN(dd)) dowCounts[(dd.getDay() + 6) % 7]++;
+    }
     catCounts[e.category] = (catCounts[e.category]||0)+1;
     siteCounts[e.site] = (siteCounts[e.site]||0)+1;
     if (chargeCounts[e.charge] !== undefined) chargeCounts[e.charge]++;
@@ -810,11 +863,26 @@ function renderCharts(view) {
   const weekLabels = Object.keys(weekCounts).sort();
   const pairEntries = Object.entries(pairCounts).sort((a,b)=>b[1]-a[1]).slice(0,8);
 
-  [chartCat, chartSite, chartCharge, chartCause, chartOrderedBy, chartPairs, chartTrend].forEach(c => c && c.destroy());
+  [chartCat, chartSite, chartCharge, chartCause, chartOrderedBy, chartPairs, chartTrend, chartResTime, chartDow].forEach(c => c && c.destroy());
   chartPairs = null;
 
   const tickColor = '#8b96ac', gridColor = '#232d40', textColor = '#e8ecf3';
   const fontOpts = { family: 'Inter' };
+
+  const resLabels = Object.keys(timeByCat);
+  chartResTime = new Chart(document.getElementById('chartResTime'), {
+    type: 'bar',
+    data: { labels: resLabels, datasets: [{ label: 'Avg min', data: resLabels.map(l => +(timeByCat[l][0] / timeByCat[l][1]).toFixed(1)), backgroundColor: '#4a90d9', borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: resLabels.length ? 'Avg resolution time by category (min)' : 'Avg resolution time — no times logged yet', color: textColor, font: {size: 12, ...fontOpts} } },
+      scales: { x: { ticks: { color: tickColor, font:{size:10} }, grid: { color: gridColor } }, y: { ticks: { color: tickColor }, grid: { color: gridColor } } } }
+  });
+
+  chartDow = new Chart(document.getElementById('chartDow'), {
+    type: 'bar',
+    data: { labels: DOW, datasets: [{ label: 'Count', data: dowCounts, backgroundColor: '#f5a623', borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'By day of week', color: textColor, font: {size: 12, ...fontOpts} } },
+      scales: { x: { ticks: { color: tickColor, font:{size:10} }, grid: { color: gridColor } }, y: { ticks: { color: tickColor, stepSize:1 }, grid: { color: gridColor } } } }
+  });
 
   chartCat = new Chart(document.getElementById('chartCategory'), {
     type: 'bar',
@@ -937,4 +1005,3 @@ if (savedDropboxUrl) {
 </script>
 </body>
 </html>
-
