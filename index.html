@@ -94,11 +94,12 @@
     color: var(--text-faint); font-weight: 600; text-transform: uppercase;
     font-size: 10px; letter-spacing: 0.05em; font-family: var(--mono);
   }
-  tbody tr { transition: background 0.1s; }
-  tbody tr:hover { background: var(--panel-2); }
+  tbody tr, tr { transition: background 0.1s; }
+  tr:hover td { background: var(--panel-2); }
   .yes { color: var(--red); font-weight: 600; }
   .no { color: var(--text-faint); }
   .unk { color: var(--amber); }
+  .num { font-family: var(--mono); }
   .del {
     color: var(--text-faint); cursor: pointer; background: none; border: none;
     padding: 3px 8px; font-size: 11px; border-radius: 5px; transition: all 0.15s;
@@ -108,7 +109,7 @@
   .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
   .chart-box { position: relative; height: 230px; }
   .empty { color: var(--text-faint); font-size: 13px; padding: 32px 0; text-align: center; }
-  .toolbar { display: flex; justify-content: space-between; align-items: center; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
   .toolbar h2 { margin: 0; }
   .file-btn { position: relative; overflow: hidden; }
   .file-btn input[type=file] { position: absolute; left: 0; top: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
@@ -119,6 +120,23 @@
   .source-status.err { color: var(--red); }
   .source-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
   .source-row .field { flex: 1; min-width: 220px; }
+
+  /* Explore panel */
+  .explore-controls { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-height: 28px; margin-bottom: 14px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(45,212,191,0.1); border: 1px solid var(--teal-dim); color: var(--text);
+    border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 12px;
+  }
+  .chip b { color: var(--teal); font-weight: 600; }
+  .chip button { background: none; color: var(--text-dim); padding: 0 6px; font-size: 14px; line-height: 1; }
+  .chip button:hover { color: var(--red); opacity: 1; }
+  .view-count { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
+  .hint { font-size: 11px; color: var(--text-faint); margin: 6px 0 16px; }
+  .link-btn { background: none; color: var(--text-dim); padding: 4px 6px; font-size: 12px; font-weight: 500; text-decoration: underline; }
+  .link-btn:hover { color: var(--teal); opacity: 1; }
+  .breakdown-row { cursor: pointer; }
 
   @media (max-width: 720px) {
     .charts { grid-template-columns: 1fr; }
@@ -147,6 +165,34 @@
 
 <div class="stats" id="stats"></div>
 
+<div class="panel" id="explore">
+  <div class="toolbar" style="margin-bottom:16px;">
+    <h2>Explore</h2>
+    <span class="view-count" id="view-count"></span>
+  </div>
+
+  <div class="explore-controls">
+    <div class="field">
+      <label>View by</label>
+      <select id="group-by" onchange="groupBy = this.value; render();"></select>
+    </div>
+    <div class="field">
+      <label>Filter field</label>
+      <select id="filter-field" onchange="filterField = this.value; render();"></select>
+    </div>
+    <div class="field">
+      <label>Filter value</label>
+      <select id="filter-value"></select>
+    </div>
+    <button class="secondary" onclick="addFilterFromControls()">Add filter</button>
+  </div>
+  <div class="chips" id="filter-chips"></div>
+  <p class="hint">Click a bar or a row below to filter to that value. Filters apply to every stat, chart, and table on the page.</p>
+
+  <div class="chart-box" id="explore-box"><canvas id="chartExplore" role="img" aria-label="Discrepancy count by selected field"></canvas></div>
+  <div class="table-scroll" style="margin-top:18px;" id="breakdownWrap"></div>
+</div>
+
 <div class="panel">
   <h2>Log a discrepancy</h2>
   <div class="row">
@@ -162,6 +208,7 @@
     <div class="field"><label>Order as placed</label><input type="text" id="f-order" placeholder="e.g. Abdomen" list="order-list"><datalist id="order-list"></datalist></div>
     <div class="field"><label>Corrected to</label><input type="text" id="f-corrected" placeholder="e.g. KUB" list="corrected-list"><datalist id="corrected-list"></datalist></div>
     <div class="field"><label>Ordering department</label><input type="text" id="f-dept" placeholder="optional" list="dept-list"><datalist id="dept-list"></datalist></div>
+    <div class="field"><label>Phone</label><input type="text" id="f-phone" placeholder="optional" list="phone-list"><datalist id="phone-list"></datalist></div>
     <div class="field">
       <label>Discrepancy category</label>
       <select id="f-category">
@@ -229,6 +276,24 @@
 
 <div class="panel">
   <div class="toolbar" style="margin-bottom:18px;">
+    <h2>Operational patterns</h2>
+  </div>
+  <div class="charts">
+    <div><div class="chart-box"><canvas id="chartResTime" role="img" aria-label="Average resolution time by category"></canvas></div></div>
+    <div><div class="chart-box"><canvas id="chartDow" role="img" aria-label="Discrepancy count by day of week"></canvas></div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="toolbar" style="margin-bottom:8px;">
+    <h2>Repeat offenders</h2>
+  </div>
+  <p class="hint">Same department + same order pair, logged 3 or more times.</p>
+  <div class="table-scroll" id="repeatWrap"></div>
+</div>
+
+<div class="panel">
+  <div class="toolbar" style="margin-bottom:18px;">
     <h2>Entries over time</h2>
   </div>
   <div class="chart-box" style="height:220px;"><canvas id="chartTrend" role="img" aria-label="Number of entries logged per week"></canvas></div>
@@ -248,7 +313,126 @@
 </div>
 <script>
 let entries = [];
+let volumes = {}; // { 'YYYY-MM-DD': ordersReviewed } from optional "Daily Volume" sheet
 
+/* ---------- Explore state ---------- */
+let groupBy = 'dept';
+let filterField = 'dept';
+let activeFilters = []; // [{ key, value }]
+
+const BASE_DIMS = [
+  { key: 'site',        label: 'Site' },
+  { key: 'dept',        label: 'Department' },
+  { key: 'phone',       label: 'Phone', get: e => formatPhone(e.phone) },
+  { key: 'category',    label: 'Category' },
+  { key: 'charge',      label: 'Charge impact' },
+  { key: 'cause',       label: 'Root cause' },
+  { key: 'orderedBy',   label: 'Entered by' },
+  { key: 'order',       label: 'Order placed' },
+  { key: 'corrected',   label: 'Corrected to' },
+  { key: 'pair',        label: 'Order pair (placed → corrected)', get: e => (e.order && e.corrected) ? `${e.order} → ${e.corrected}` : '' },
+  { key: 'schedReason', label: 'Scheduling issue' },
+];
+
+/* Any Excel/CSV column the dashboard doesn't recognize is kept in e.extra
+   and shows up in the View by / Filter dropdowns automatically. */
+function getDims() {
+  const extraNames = new Set();
+  entries.forEach(e => Object.keys(e.extra || {}).forEach(k => extraNames.add(k)));
+  const extras = [...extraNames].sort().map(name => ({
+    key: 'x:' + name, label: name, get: e => (e.extra || {})[name]
+  }));
+  return BASE_DIMS.concat(extras);
+}
+
+function dimByKey(key) { return getDims().find(d => d.key === key); }
+
+function valueOf(dim, e) {
+  if (!dim) return '(blank)';
+  const raw = dim.get ? dim.get(e) : e[dim.key];
+  const v = String(raw ?? '').trim();
+  return v || '(blank)';
+}
+
+/* Normalizes phone numbers so 507-284-1234, (507) 284-1234 and 5072841234
+   group together. Anything not 10 digits (e.g. internal extensions) groups by its digits. */
+function formatPhone(p) {
+  const s = String(p ?? '').trim();
+  if (!s) return '';
+  let d = s.replace(/\D/g, '');
+  if (d.length === 11 && d[0] === '1') d = d.slice(1);
+  if (d.length === 10) return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6)}`;
+  return d || s;
+}
+
+function getView() {
+  return entries.filter(e => activeFilters.every(f => {
+    const dim = dimByKey(f.key);
+    if (!dim) return true;
+    return valueOf(dim, e) === f.value;
+  }));
+}
+
+function addFilter(key, value) {
+  activeFilters = activeFilters.filter(f => f.key !== key);
+  activeFilters.push({ key, value });
+  render();
+}
+
+function addFilterFromControls() {
+  const value = document.getElementById('filter-value').value;
+  if (!filterField || value === '') return;
+  addFilter(filterField, value);
+}
+
+function removeFilter(i) { activeFilters.splice(i, 1); render(); }
+function clearFilters() { activeFilters = []; render(); }
+
+/* ---------- Header mapping (Excel + CSV) ---------- */
+const ALIASES = {
+  date: 'date',
+  site: 'site',
+  orderplaced: 'order', orderasplaced: 'order', order: 'order',
+  correctedto: 'corrected', corrected: 'corrected',
+  department: 'dept', orderingdepartment: 'dept', orderingdept: 'dept', dept: 'dept',
+  category: 'category', discrepancycategory: 'category',
+  chargeimpact: 'charge', charge: 'charge',
+  rootcause: 'cause', cause: 'cause',
+  rootcausedetail: 'causeDetail', rootcausedetailifother: 'causeDetail', causedetail: 'causeDetail', otherdetail: 'causeDetail',
+  resolutiontimemin: 'time', resolutiontime: 'time', resolutiontimeminutes: 'time', time: 'time',
+  notes: 'notes',
+  schedulingissue: 'schedReason', schedulingreason: 'schedReason',
+  schedulingissuedetail: 'schedReasonDetail', schedulingissuedetails: 'schedReasonDetail', schedulingreasondetail: 'schedReasonDetail',
+  orderedby: 'orderedBy', orderenteredby: 'orderedBy', enteredby: 'orderedBy',
+};
+
+function normKey(h) { return String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+function fieldFor(norm) {
+  if (!norm) return null;
+  if (ALIASES[norm]) return ALIASES[norm];
+  if (norm.includes('phone')) return 'phone';
+  return null;
+}
+
+function blankEntry() {
+  return { date:'', site:'', order:'', corrected:'', dept:'', phone:'', category:'', charge:'', cause:'',
+           causeDetail:'', orderedBy:'', time:'', notes:'', schedReason:'', schedReasonDetail:'', extra:{} };
+}
+
+function mapRow(headers, r) {
+  const e = blankEntry();
+  headers.forEach((h, idx) => {
+    const v = r[idx];
+    const field = fieldFor(normKey(h));
+    if (field === 'date') e.date = excelDateToISO(v);
+    else if (field) e[field] = String(v ?? '').trim();
+    else if (h && String(v ?? '').trim()) e.extra[h] = String(v).trim();
+  });
+  return e;
+}
+
+/* ---------- Dropbox ---------- */
 function setSourceStatus(msg, cls) {
   const el = document.getElementById('source-status');
   el.textContent = msg;
@@ -277,7 +461,7 @@ function excelDateToISO(v) {
       return `${parsed.y}-${mm}-${dd}`;
     }
   }
-  return String(v || '');
+  return String(v || '').trim();
 }
 
 async function loadFromDropbox(silent) {
@@ -296,41 +480,68 @@ async function loadFromDropbox(silent) {
     if (!sheet) throw new Error('No "Log" sheet found in that file.');
 
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+    if (!rows.length) throw new Error('The Log sheet is empty.');
+
+    const headers = rows[0].map(h => String(h ?? '').trim());
+    const recognized = headers.filter(h => fieldFor(normKey(h))).length;
+    const phoneHeader = headers.find(h => fieldFor(normKey(h)) === 'phone');
     const newEntries = [];
-    for (let i = 2; i < rows.length; i++) { // skip header row + example row
-      const r = rows[i];
-      if (!r || !r.length) continue;
-      const dateVal = excelDateToISO(r[0]);
-      const notesVal = String(r[10] || '');
-      if (!dateVal) continue;
-      if (notesVal.includes('Example row - delete before use')) continue;
-      newEntries.push({
-        date: dateVal,
-        site: String(r[1] || ''),
-        order: String(r[2] || ''),
-        corrected: String(r[3] || ''),
-        dept: String(r[4] || ''),
-        category: String(r[5] || ''),
-        charge: String(r[6] || ''),
-        cause: String(r[7] || ''),
-        causeDetail: String(r[8] || ''),
-        time: String(r[9] || ''),
-        notes: notesVal,
-        schedReason: String(r[11] || ''),
-        schedReasonDetail: String(r[12] || ''),
-        orderedBy: String(r[13] || ''),
-      });
+
+    if (recognized >= 4) {
+      // Header-based: reads columns by name, so column order in Excel doesn't matter.
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r || !r.some(v => String(v ?? '').trim())) continue;
+        const e = mapRow(headers, r);
+        if (!e.date) continue;
+        if (/example row/i.test(e.notes)) continue;
+        newEntries.push(e);
+      }
+    } else {
+      // Fallback: original fixed column positions.
+      for (let i = 2; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r || !r.length) continue;
+        const dateVal = excelDateToISO(r[0]);
+        const notesVal = String(r[10] || '');
+        if (!dateVal) continue;
+        if (notesVal.includes('Example row - delete before use')) continue;
+        newEntries.push(Object.assign(blankEntry(), {
+          date: dateVal, site: String(r[1] || ''), order: String(r[2] || ''), corrected: String(r[3] || ''),
+          dept: String(r[4] || ''), category: String(r[5] || ''), charge: String(r[6] || ''),
+          cause: String(r[7] || ''), causeDetail: String(r[8] || ''), time: String(r[9] || ''),
+          notes: notesVal, schedReason: String(r[11] || ''), schedReasonDetail: String(r[12] || ''),
+          orderedBy: String(r[13] || ''),
+        }));
+      }
     }
 
     entries = newEntries;
+
+    // Optional "Daily Volume" sheet: column A = Date, column B = orders reviewed
+    volumes = {};
+    const volSheet = wb.Sheets['Daily Volume'];
+    if (volSheet) {
+      const vr = XLSX.utils.sheet_to_json(volSheet, { header: 1, raw: true, defval: '' });
+      for (let i = 1; i < vr.length; i++) {
+        const d = excelDateToISO(vr[i][0]);
+        const n = Number(vr[i][1]);
+        if (d && n > 0) volumes[d] = (volumes[d] || 0) + n;
+      }
+    }
+
     localStorage.setItem('dropbox-source-url', rawUrl);
     render();
-    setSourceStatus(`Loaded ${entries.length} entries from Dropbox — last refreshed ${new Date().toLocaleTimeString()}.`, 'ok');
+    const phoneNote = phoneHeader ? ` Phone column: "${phoneHeader}".` : ' No phone column found.';
+    const volDays = Object.keys(volumes).length;
+    const volNote = volSheet ? ` Daily volume: ${volDays} day(s).` : ' No "Daily Volume" sheet.';
+    setSourceStatus(`Loaded ${entries.length} entries from Dropbox — last refreshed ${new Date().toLocaleTimeString()}.${phoneNote}${volNote}`, 'ok');
   } catch (err) {
     setSourceStatus('Could not load from Dropbox: ' + err.message, 'err');
   }
 }
 
+/* ---------- Local storage ---------- */
 function loadData() {
   try {
     const raw = localStorage.getItem('discrepancy-entries');
@@ -344,6 +555,7 @@ function saveData() {
   catch (e) { console.error('Save failed', e); }
 }
 
+/* ---------- Form ---------- */
 function toggleCauseDetail() {
   const isOther = document.getElementById('f-cause').value === 'Other';
   document.getElementById('f-cause-detail-wrap').style.display = isOther ? 'flex' : 'none';
@@ -355,6 +567,7 @@ function addEntry() {
   const order = document.getElementById('f-order').value.trim();
   const corrected = document.getElementById('f-corrected').value.trim();
   const dept = document.getElementById('f-dept').value.trim();
+  const phone = document.getElementById('f-phone').value.trim();
   const category = document.getElementById('f-category').value;
   const charge = document.getElementById('f-charge').value;
   const cause = document.getElementById('f-cause').value;
@@ -366,9 +579,9 @@ function addEntry() {
   if (!site) { alert('Enter a site'); return; }
   if (cause === 'Other' && !causeDetail) { alert('Enter a root cause detail for Other'); return; }
 
-  entries.push({ date, site, order, corrected, dept, category, charge, cause, causeDetail, orderedBy, time, notes });
+  entries.push(Object.assign(blankEntry(), { date, site, order, corrected, dept, phone, category, charge, cause, causeDetail, orderedBy, time, notes }));
   saveData();
-  ['f-order','f-corrected','f-dept','f-time','f-notes','f-cause-detail'].forEach(id => document.getElementById(id).value = '');
+  ['f-order','f-corrected','f-dept','f-phone','f-time','f-notes','f-cause-detail'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('f-orderedby').value = '';
   toggleCauseDetail();
   render();
@@ -382,42 +595,44 @@ function deleteEntry(idx) {
 
 function escapeHtml(s) {
   const d = document.createElement('div');
-  d.textContent = s;
+  d.textContent = s ?? '';
   return d.innerHTML;
 }
 
+/* ---------- Render ---------- */
 function render() {
-  renderStats();
-  renderTable();
-  renderCharts();
-  updateDeptList();
-  updateExamLists();
+  const view = getView();
+  renderStats(view);
+  renderExplore(view);
+  renderTable(view);
+  renderCharts(view);
+  updateLists();
 }
 
-function updateExamLists() {
-  const ordered = [...new Set(entries.map(e => e.order).filter(Boolean))].sort();
-  const corrected = [...new Set(entries.map(e => e.corrected).filter(Boolean))].sort();
-  document.getElementById('order-list').innerHTML = ordered.map(v => `<option value="${escapeHtml(v)}">`).join('');
-  document.getElementById('corrected-list').innerHTML = corrected.map(v => `<option value="${escapeHtml(v)}">`).join('');
+function setDatalist(id, values) {
+  document.getElementById(id).innerHTML = values.map(v => `<option value="${escapeHtml(v)}">`).join('');
 }
 
-function updateDeptList() {
-  const depts = [...new Set(entries.map(e => e.dept).filter(Boolean))].sort();
-  document.getElementById('dept-list').innerHTML = depts.map(d => `<option value="${escapeHtml(d)}">`).join('');
+function updateLists() {
+  const uniq = key => [...new Set(entries.map(e => e[key]).filter(Boolean))].sort();
+  setDatalist('order-list', uniq('order'));
+  setDatalist('corrected-list', uniq('corrected'));
+  setDatalist('dept-list', uniq('dept'));
+  setDatalist('phone-list', uniq('phone'));
 }
 
-function renderStats() {
-  const total = entries.length;
-  const chargeImpact = entries.filter(e => e.charge === 'Yes').length;
+function renderStats(view) {
+  const total = view.length;
+  const chargeImpact = view.filter(e => e.charge === 'Yes').length;
   const chargePct = total ? Math.round((chargeImpact/total)*100) : 0;
-  const sites = new Set(entries.map(e => e.site)).size;
-  const topCat = topOf(entries.map(e => e.category));
+  const sites = new Set(view.map(e => e.site).filter(Boolean)).size;
+  const topCat = topOf(view.map(e => e.category).filter(Boolean));
 
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="label">Total logged</div><div class="value">${total}</div></div>
     <div class="stat warn"><div class="label">Charge-impacting</div><div class="value">${chargeImpact}<span style="font-size:14px;color:var(--text-faint);"> / ${chargePct}%</span></div></div>
     <div class="stat"><div class="label">Sites represented</div><div class="value">${sites}</div></div>
-    <div class="stat"><div class="label">Top category</div><div class="value small">${topCat || '—'}</div></div>
+    <div class="stat"><div class="label">Top category</div><div class="value small">${escapeHtml(topCat || '—')}</div></div>
   `;
 }
 
@@ -428,17 +643,119 @@ function topOf(arr) {
   return Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
 }
 
-function renderTable() {
+function fillSelect(id, dims, selected) {
+  document.getElementById(id).innerHTML = dims.map(d =>
+    `<option value="${escapeHtml(d.key)}"${d.key === selected ? ' selected' : ''}>${escapeHtml(d.label)}</option>`
+  ).join('');
+}
+
+let chartExplore;
+function renderExplore(view) {
+  const dims = getDims();
+  if (!dims.some(d => d.key === groupBy)) groupBy = 'dept';
+  if (!dims.some(d => d.key === filterField)) filterField = 'dept';
+  fillSelect('group-by', dims, groupBy);
+  fillSelect('filter-field', dims, filterField);
+
+  // Filter value options: values of the chosen field within the current view, most common first
+  const fDim = dimByKey(filterField);
+  const fCounts = {};
+  view.forEach(e => { const v = valueOf(fDim, e); fCounts[v] = (fCounts[v]||0)+1; });
+  const fSorted = Object.entries(fCounts).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+  document.getElementById('filter-value').innerHTML = fSorted.length
+    ? fSorted.map(([v,n]) => `<option value="${escapeHtml(v)}">${escapeHtml(v)} (${n})</option>`).join('')
+    : '<option value="">No values</option>';
+
+  // Chips
+  const chipsEl = document.getElementById('filter-chips');
+  if (!activeFilters.length) {
+    chipsEl.innerHTML = '<span style="font-size:12px;color:var(--text-faint);">No filters — showing everything.</span>';
+  } else {
+    chipsEl.innerHTML = activeFilters.map((f, i) => {
+      const d = dimByKey(f.key);
+      return `<span class="chip"><b>${escapeHtml(d ? d.label : f.key)}:</b> ${escapeHtml(f.value)}<button title="Remove filter" onclick="removeFilter(${i})">×</button></span>`;
+    }).join('') + '<button class="link-btn" onclick="clearFilters()">Clear all</button>';
+  }
+
+  document.getElementById('view-count').textContent = `Showing ${view.length} of ${entries.length}`;
+
+  // Group the current view by the chosen field
+  const gDim = dimByKey(groupBy);
+  const groups = {};
+  view.forEach(e => {
+    const v = valueOf(gDim, e);
+    if (!groups[v]) groups[v] = { count: 0, yes: 0, cats: {} };
+    groups[v].count++;
+    if (e.charge === 'Yes') groups[v].yes++;
+    if (e.category) groups[v].cats[e.category] = (groups[v].cats[e.category]||0)+1;
+  });
+  const sorted = Object.entries(groups).sort((a,b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
+
+  // Chart
+  if (chartExplore) { chartExplore.destroy(); chartExplore = null; }
+  const box = document.getElementById('explore-box');
+  const canvas = document.getElementById('chartExplore');
+  box.style.height = Math.max(160, sorted.length * 28 + 50) + 'px';
+  if (sorted.length) {
+    const tickColor = '#8b96ac', gridColor = '#232d40', textColor = '#e8ecf3';
+    chartExplore = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: sorted.map(s => s[0]),
+        datasets: [
+          { label: 'Charge-impacting', data: sorted.map(s => s[1].yes), backgroundColor: '#f0574a', borderRadius: 4, stack: 's' },
+          { label: 'Other', data: sorted.map(s => s[1].count - s[1].yes), backgroundColor: '#2dd4bf', borderRadius: 4, stack: 's' },
+        ]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        onClick: (evt, els, chart) => { if (els.length) addFilter(groupBy, chart.data.labels[els[0].index]); },
+        onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        plugins: {
+          legend: { position: 'bottom', labels: { color: tickColor, font: { size: 11, family: 'Inter' }, boxWidth: 10 } },
+          title: { display: true, text: 'By ' + (gDim ? gDim.label.toLowerCase() : ''), color: textColor, font: { size: 12, family: 'Inter' } }
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: tickColor, stepSize: 1 }, grid: { color: gridColor } },
+          y: { stacked: true, ticks: { color: textColor, font: { size: 11 } }, grid: { display: false } }
+        }
+      }
+    });
+  } else {
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Breakdown table
+  const wrap = document.getElementById('breakdownWrap');
+  if (!sorted.length) { wrap.innerHTML = '<div class="empty">No entries match the current filters.</div>'; return; }
+  const total = view.length;
+  wrap.innerHTML = `<table>
+    <tr><th>${escapeHtml(gDim ? gDim.label : '')}</th><th>Count</th><th>% of shown</th><th>Charge-impacting</th><th>Top category</th></tr>
+    ${sorted.map(([v, g], i) => `<tr class="breakdown-row" onclick="addFilter(groupBy, exploreValues[${i}])">
+      <td>${escapeHtml(v)}</td>
+      <td class="num">${g.count}</td>
+      <td class="num">${Math.round(g.count / total * 100)}%</td>
+      <td class="num ${g.yes ? 'yes' : 'no'}">${g.yes} (${Math.round(g.yes / g.count * 100)}%)</td>
+      <td>${escapeHtml(topOf(Object.entries(g.cats).flatMap(([c, n]) => Array(n).fill(c))) || '—')}</td>
+    </tr>`).join('')}
+  </table>`;
+  exploreValues = sorted.map(s => s[0]);
+}
+let exploreValues = [];
+
+function renderTable(view) {
   const wrap = document.getElementById('tableWrap');
   if (!entries.length) { wrap.innerHTML = '<div class="empty">No entries yet. Log one above or import a CSV.</div>'; return; }
-  const rows = entries.slice().reverse().map((e, i) => {
-    const realIdx = entries.length - 1 - i;
+  if (!view.length) { wrap.innerHTML = '<div class="empty">No entries match the current filters.</div>'; return; }
+  const rows = view.slice().reverse().map(e => {
+    const realIdx = entries.indexOf(e);
     return `<tr>
       <td>${escapeHtml(e.date)}</td>
       <td>${escapeHtml(e.site)}</td>
       <td>${escapeHtml(e.order)}</td>
       <td>${escapeHtml(e.corrected||'')}</td>
       <td>${escapeHtml(e.dept||'')}</td>
+      <td>${escapeHtml(formatPhone(e.phone))}</td>
       <td>${escapeHtml(e.category)}</td>
       <td class="${e.charge==='Yes'?'yes':e.charge==='Unknown'?'unk':'no'}">${escapeHtml(e.charge)}</td>
       <td>${escapeHtml(e.cause)}${e.causeDetail ? ' — ' + escapeHtml(e.causeDetail) : ''}${e.schedReason ? ' (' + escapeHtml(e.schedReason) + (e.schedReasonDetail ? ': ' + escapeHtml(e.schedReasonDetail) : '') + ')' : ''}</td>
@@ -449,13 +766,13 @@ function renderTable() {
     </tr>`;
   }).join('');
   wrap.innerHTML = `<table>
-    <tr><th>Date</th><th>Site</th><th>Order placed</th><th>Corrected to</th><th>Dept</th><th>Category</th><th>Charge</th><th>Root cause</th><th>Entered by</th><th>Time</th><th>Notes</th><th></th></tr>
+    <tr><th>Date</th><th>Site</th><th>Order placed</th><th>Corrected to</th><th>Dept</th><th>Phone</th><th>Category</th><th>Charge</th><th>Root cause</th><th>Entered by</th><th>Time</th><th>Notes</th><th></th></tr>
     ${rows}
   </table>`;
 }
 
 let chartCat, chartSite, chartCharge, chartCause, chartOrderedBy, chartPairs, chartTrend;
-function renderCharts() {
+function renderCharts(view) {
   const catCounts = {};
   const siteCounts = {};
   const chargeCounts = { Yes: 0, No: 0, Unknown: 0 };
@@ -464,7 +781,7 @@ function renderCharts() {
   const pairCounts = {};
   const weekCounts = {};
 
-  entries.forEach(e => {
+  view.forEach(e => {
     catCounts[e.category] = (catCounts[e.category]||0)+1;
     siteCounts[e.site] = (siteCounts[e.site]||0)+1;
     if (chargeCounts[e.charge] !== undefined) chargeCounts[e.charge]++;
@@ -494,6 +811,7 @@ function renderCharts() {
   const pairEntries = Object.entries(pairCounts).sort((a,b)=>b[1]-a[1]).slice(0,8);
 
   [chartCat, chartSite, chartCharge, chartCause, chartOrderedBy, chartPairs, chartTrend].forEach(c => c && c.destroy());
+  chartPairs = null;
 
   const tickColor = '#8b96ac', gridColor = '#232d40', textColor = '#e8ecf3';
   const fontOpts = { family: 'Inter' };
@@ -554,11 +872,13 @@ function renderCharts() {
   });
 }
 
+/* ---------- CSV ---------- */
 function exportCSV() {
-  const headers = ['Date','Site','OrderPlaced','CorrectedTo','Department','Category','ChargeImpact','RootCause','RootCauseDetail','OrderedBy','ResolutionTimeMin','Notes','SchedulingIssue','SchedulingIssueDetail'];
-  const rows = entries.map(e => [e.date,e.site,e.order,e.corrected,e.dept,e.category,e.charge,e.cause,e.causeDetail,e.orderedBy,e.time,e.notes,e.schedReason,e.schedReasonDetail]
+  const extraNames = [...new Set(entries.flatMap(e => Object.keys(e.extra || {})))].sort();
+  const headers = ['Date','Site','OrderPlaced','CorrectedTo','Department','Category','ChargeImpact','RootCause','RootCauseDetail','OrderedBy','ResolutionTimeMin','Notes','SchedulingIssue','SchedulingIssueDetail','Phone', ...extraNames];
+  const rows = entries.map(e => [e.date,e.site,e.order,e.corrected,e.dept,e.category,e.charge,e.cause,e.causeDetail,e.orderedBy,e.time,e.notes,e.schedReason,e.schedReasonDetail,e.phone, ...extraNames.map(n => (e.extra||{})[n])]
     .map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
-  const csv = '\uFEFF' + headers.join(',') + '\r\n' + rows.join('\r\n');
+  const csv = '\uFEFF' + headers.map(h => `"${h.replace(/"/g,'""')}"`).join(',') + '\r\n' + rows.join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -571,31 +891,16 @@ function importCSV(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = (e) => {
-    const text = e.target.result.replace(/^\uFEFF/, '');
+  reader.onload = (ev) => {
+    const text = ev.target.result.replace(/^\uFEFF/, '');
     const lines = text.split(/\r?\n/).filter(l => l.trim().length);
     if (lines.length < 2) return;
-    const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+    const headers = parseCSVLine(lines[0]).map(h => h.trim());
     for (let i = 1; i < lines.length; i++) {
-      const vals = parseCSVLine(lines[i]);
-      const obj = {};
-      headers.forEach((h, idx) => obj[h] = vals[idx] || '');
-      entries.push({
-        date: obj.date || '',
-        site: obj.site || '',
-        order: obj.orderplaced || obj.order || '',
-        corrected: obj.correctedto || obj.corrected || '',
-        dept: obj.department || obj.dept || '',
-        category: obj.category || '',
-        charge: obj.chargeimpact || obj.charge || 'No',
-        cause: obj.rootcause || obj.cause || '',
-        causeDetail: obj.rootcausedetail || obj.causedetail || '',
-        orderedBy: obj.orderedby || '',
-        time: obj.resolutiontimemin || obj.time || '',
-        notes: obj.notes || '',
-        schedReason: obj.schedulingissue || '',
-        schedReasonDetail: obj.schedulingissuedetail || '',
-      });
+      const e = mapRow(headers, parseCSVLine(lines[i]));
+      if (/example row/i.test(e.notes)) continue;
+      if (!e.charge) e.charge = 'No';
+      entries.push(e);
     }
     saveData();
     render();
@@ -632,3 +937,4 @@ if (savedDropboxUrl) {
 </script>
 </body>
 </html>
+
