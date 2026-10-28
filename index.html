@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Order Discrepancy Pattern Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0f17;
+    --panel: #121826;
+    --panel-2: #161f30;
+    --border: #232d40;
+    --border-hi: #33415a;
+    --text: #e8ecf3;
+    --text-dim: #8b96ac;
+    --text-faint: #5b6478;
+    --teal: #2dd4bf;
+    --teal-dim: #0f766e;
+    --amber: #f5a623;
+    --red: #f0574a;
+    --blue: #4a90d9;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 28px 48px;
+    background: radial-gradient(ellipse at top, #0d1220 0%, var(--bg) 55%);
+    color: var(--text); font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
+    color: var(--teal); text-transform: uppercase; margin: 0 0 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .eyebrow::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 8px var(--teal); }
+  h1 { font-size: 26px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--text-dim); font-size: 14px; margin: 0 0 28px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 28px; }
+  .stat {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--border); border-left: 3px solid var(--teal-dim);
+    border-radius: 10px; padding: 16px 18px;
+  }
+  .stat.warn { border-left-color: var(--amber); }
+  .stat .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .stat .value { font-family: var(--mono); font-size: 28px; font-weight: 600; color: var(--text); }
+  .stat .value.small { font-size: 17px; font-family: var(--sans); font-weight: 600; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 22px 24px; margin-bottom: 20px;
+  }
+  .panel h2 {
+    font-size: 13px; font-weight: 600; margin: 0 0 18px; color: var(--text);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel h2::before { content: ''; width: 3px; height: 14px; background: var(--teal); border-radius: 2px; }
+
+  .row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  label { font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 5px; font-weight: 500; }
+  input, select, textarea {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 9px 11px; font-size: 13px; font-family: var(--sans);
+    transition: border-color 0.15s;
+  }
+  input:hover, select:hover { border-color: var(--border-hi); }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(45,212,191,0.12); }
+  .field { display: flex; flex-direction: column; }
+
+  button {
+    background: var(--teal); color: #06201c; border: none; border-radius: 7px;
+    padding: 10px 20px; font-size: 13px; font-weight: 600; cursor: pointer;
+    font-family: var(--sans); transition: transform 0.1s, opacity 0.15s;
+  }
+  button:hover { opacity: 0.88; }
+  button:active { transform: scale(0.98); }
+  button.secondary {
+    background: var(--panel-2); border: 1px solid var(--border-hi); color: var(--text);
+    font-weight: 500;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 10px 10px; border-bottom: 1px solid var(--border); }
+  th {
+    color: var(--text-faint); font-weight: 600; text-transform: uppercase;
+    font-size: 10px; letter-spacing: 0.05em; font-family: var(--mono);
+  }
+  tbody tr, tr { transition: background 0.1s; }
+  tr:hover td { background: var(--panel-2); }
+  .yes { color: var(--red); font-weight: 600; }
+  .no { color: var(--text-faint); }
+  .unk { color: var(--amber); }
+  .num { font-family: var(--mono); }
+  .del {
+    color: var(--text-faint); cursor: pointer; background: none; border: none;
+    padding: 3px 8px; font-size: 11px; border-radius: 5px; transition: all 0.15s;
+  }
+  .del:hover { color: var(--red); background: rgba(240,87,74,0.1); }
+
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .chart-box { position: relative; height: 230px; }
+  .empty { color: var(--text-faint); font-size: 13px; padding: 32px 0; text-align: center; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .toolbar h2 { margin: 0; }
+  .file-btn { position: relative; overflow: hidden; }
+  .file-btn input[type=file] { position: absolute; left: 0; top: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+  .table-scroll { overflow-x: auto; }
+
+  .source-status { font-size: 11px; color: var(--text-faint); margin-top: 6px; }
+  .source-status.ok { color: var(--teal); }
+  .source-status.err { color: var(--red); }
+  .source-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+  .source-row .field { flex: 1; min-width: 220px; }
+
+  /* Explore panel */
+  .explore-controls { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-height: 28px; margin-bottom: 14px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(45,212,191,0.1); border: 1px solid var(--teal-dim); color: var(--text);
+    border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 12px;
+  }
+  .chip b { color: var(--teal); font-weight: 600; }
+  .chip button { background: none; color: var(--text-dim); padding: 0 6px; font-size: 14px; line-height: 1; }
+  .chip button:hover { color: var(--red); opacity: 1; }
+  .view-count { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
+  .hint { font-size: 11px; color: var(--text-faint); margin: 6px 0 16px; }
+  .link-btn { background: none; color: var(--text-dim); padding: 4px 6px; font-size: 12px; font-weight: 500; text-decoration: underline; }
+  .link-btn:hover { color: var(--teal); opacity: 1; }
+  .breakdown-row { cursor: pointer; }
+
+  @media (max-width: 720px) {
+    .charts { grid-template-columns: 1fr; }
+    body { padding: 20px 16px 40px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="eyebrow">Radiology IT · Discrepancy tracking</p>
+<h1>Order discrepancy pattern dashboard</h1>
+<p class="sub">Order/protocol discrepancy log across 11 sites</p>
+
+<div class="panel">
+  <h2>Live data source</h2>
+  <div class="source-row">
+    <div class="field">
+      <label>Dropbox share link to Discrepancy_Tracker.xlsx</label>
+      <input type="text" id="dropbox-url" placeholder="https://www.dropbox.com/scl/fi/.../Discrepancy_Tracker.xlsx?dl=0">
+    </div>
+    <button onclick="loadFromDropbox()">Load</button>
+  </div>
+  <div class="source-status" id="source-status">Not connected — using locally logged entries.</div>
+</div>
+
+<div class="stats" id="stats"></div>
+
+<div class="panel" id="dept-panel">
+  <div class="toolbar" style="margin-bottom:8px;">
+    <h2>Errors by department</h2>
+    <select id="dept-limit" onchange="renderDept(getView())" style="padding:6px 9px;">
+      <option value="10">Top 10</option>
+      <option value="15" selected>Top 15</option>
+      <option value="25">Top 25</option>
+      <option value="0">All</option>
+    </select>
+  </div>
+  <p class="hint">Highest-error departments first. Red = charge-impacting. Click a bar to filter the whole page to that department.</p>
+  <div class="chart-box" id="dept-box"><canvas id="chartDept" role="img" aria-label="Discrepancy count by ordering department, highest first"></canvas></div>
+  <div class="source-status" id="dept-note"></div>
+</div>
+
+<div class="panel" id="entered-panel">
+  <div class="toolbar" style="margin-bottom:16px;">
+    <h2>Who entered the order</h2>
+  </div>
+  <div class="table-scroll" id="enteredWrap"></div>
+  <div class="chart-box" id="dept-entered-box" style="margin-top:20px;"><canvas id="chartDeptEntered" role="img" aria-label="Top departments split by who entered the order"></canvas></div>
+  <p class="hint" style="margin-bottom:0;">Click a row or bar segment to filter the whole page to it.</p>
+</div>
+
+<div class="panel" id="phone-panel">
+  <div class="toolbar" style="margin-bottom:8px;">
+    <h2>Phone numbers</h2>
+    <input type="text" id="phone-search" placeholder="Search number…" oninput="renderPhones(getView())" style="width:200px;">
+  </div>
+  <p class="hint">Most-used ordering numbers first (top 25; searching shows every match). Click a row to filter the whole page to that number.</p>
+  <div class="table-scroll" id="phoneWrap"></div>
+</div>
+
+<div class="panel" id="explore">
+  <div class="toolbar" style="margin-bottom:16px;">
+    <h2>Explore</h2>
+    <span class="view-count" id="view-count"></span>
+  </div>
+
+  <div class="explore-controls">
+    <div class="field">
+      <label>View by</label>
+      <select id="group-by" onchange="groupBy = this.value; render();"></select>
+    </div>
+    <div class="field">
+      <label>Filter field</label>
+      <select id="filter-field" onchange="filterField = this.value; render();"></select>
+    </div>
+    <div class="field">
+      <label>Filter value</label>
+      <select id="filter-value"></select>
+    </div>
+    <button class="secondary" onclick="addFilterFromControls()">Add filter</button>
+    <button class="secondary" id="clear-filters-btn" onclick="clearFilters()">Clear all filters</button>
+  </div>
+  <div class="chips" id="filter-chips"></div>
+  <p class="hint">Click a bar or a row below to filter to that value. Filters apply to every stat, chart, and table on the page.</p>
+
+  <div class="chart-box" id="explore-box"><canvas id="chartExplore" role="img" aria-label="Discrepancy count by selected field"></canvas></div>
+  <div class="table-scroll" style="margin-top:18px;" id="breakdownWrap"></div>
+</div>
+
+<div class="panel">
+  <h2>Log a discrepancy</h2>
+  <div class="row">
+    <div class="field"><label>Date</label><input type="date" id="f-date"></div>
+    <div class="field"><label>Site</label>
+      <select id="f-site">
+        <option value="">Select site</option>
+        <option>Ch2</option><option>Go14</option><option>SMOP</option><option>Go15E</option>
+        <option>NW</option><option>NE</option><option>SE</option><option>KAKH</option>
+        <option>Peds</option><option>Baldwin</option><option>DAHLC</option>
+      </select>
+    </div>
+    <div class="field"><label>Order as placed</label><input type="text" id="f-order" placeholder="e.g. Abdomen" list="order-list"><datalist id="order-list"></datalist></div>
+    <div class="field"><label>Corrected to</label><input type="text" id="f-corrected" placeholder="e.g. KUB" list="corrected-list"><datalist id="corrected-list"></datalist></div>
+    <div class="field"><label>Ordering department</label><input type="text" id="f-dept" placeholder="optional" list="dept-list"><datalist id="dept-list"></datalist></div>
+    <div class="field"><label>Phone</label><input type="text" id="f-phone" placeholder="optional" list="phone-list"><datalist id="phone-list"></datalist></div>
+    <div class="field">
+      <label>Discrepancy category</label>
+      <select id="f-category">
+        <option>Order name/view count mismatch</option>
+        <option>Order views vs. protocol mismatch</option>
+        <option>Incorrect order (wrong exam type)</option>
+        <option>Prerequisite not met</option>
+        <option>Exam scheduled incorrectly</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Charge impact</label>
+      <select id="f-charge"><option>No</option><option>Yes</option><option>Unknown</option></select>
+    </div>
+    <div class="field">
+      <label>Root cause</label>
+      <select id="f-cause" onchange="toggleCauseDetail()">
+        <option>Provider Order Error</option>
+        <option>Scheduling Error</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div class="field" id="f-cause-detail-wrap" style="display:none;">
+      <label>Root cause detail</label>
+      <input type="text" id="f-cause-detail" placeholder="Describe the cause">
+    </div>
+    <div class="field">
+      <label>Order entered by</label>
+      <select id="f-orderedby">
+        <option value="">Unspecified</option>
+        <option>Ordering Provider</option>
+        <option>Appointment Office (Proxy)</option>
+        <option>Scheduling Staff</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div class="field"><label>Resolution time (min)</label><input type="number" id="f-time" placeholder="optional"></div>
+  </div>
+  <div class="row">
+    <div class="field" style="flex:1; min-width:240px;"><label>Notes</label><input type="text" id="f-notes" placeholder="optional"></div>
+  </div>
+  <button onclick="addEntry()">Add entry</button>
+</div>
+
+<div class="panel">
+  <div class="toolbar" style="margin-bottom:18px;">
+    <h2>Pattern breakdown</h2>
+  </div>
+  <div class="charts">
+    <div><div class="chart-box"><canvas id="chartCategory" role="img" aria-label="Discrepancy count by category"></canvas></div></div>
+    <div><div class="chart-box"><canvas id="chartSite" role="img" aria-label="Discrepancy count by site"></canvas></div></div>
+    <div><div class="chart-box"><canvas id="chartCharge" role="img" aria-label="Discrepancy count by charge impact"></canvas></div></div>
+    <div><div class="chart-box"><canvas id="chartCause" role="img" aria-label="Discrepancy count by root cause"></canvas></div></div>
+    <div><div class="chart-box"><canvas id="chartOrderedBy" role="img" aria-label="Discrepancy count by who entered the order"></canvas></div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="toolbar" style="margin-bottom:18px;">
+    <h2>Top order patterns</h2>
+  </div>
+  <div class="chart-box" style="height:260px;"><canvas id="chartPairs" role="img" aria-label="Most frequent order-as-placed to corrected-to pairs"></canvas></div>
+</div>
+
+<div class="panel">
+  <div class="toolbar" style="margin-bottom:18px;">
+    <h2>Operational patterns</h2>
+  </div>
+  <div class="charts">
+    <div><div class="chart-box"><canvas id="chartResTime" role="img" aria-label="Average resolution time by category"></canvas></div></div>
+    <div><div class="chart-box"><canvas id="chartDow" role="img" aria-label="Discrepancy count by day of week"></canvas></div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="toolbar" style="margin-bottom:8px;">
+    <h2>Repeat offenders</h2>
+  </div>
+  <p class="hint">Same department + same order pair, logged 3 or more times.</p>
+  <div class="table-scroll" id="repeatWrap"></div>
+</div>
+
+<div class="panel">
+  <div class="toolbar" style="margin-bottom:18px;">
+    <h2>Entries over time</h2>
+  </div>
+  <div class="chart-box" style="height:220px;"><canvas id="chartTrend" role="img" aria-label="Number of entries logged per week"></canvas></div>
+</div>
+
+<div class="panel">
+  <div class="toolbar" style="margin-bottom:18px;">
+    <h2>Entries</h2>
+    <div style="display:flex; gap:8px;">
+      <button class="secondary file-btn">Import CSV<input type="file" accept=".csv" onchange="importCSV(event)"></button>
+      <button class="secondary" onclick="exportCSV()">Export CSV</button>
+    </div>
+  </div>
+  <div class="table-scroll" id="tableWrap"></div>
+</div>
+
+</div>
+<script>
+let entries = [];
+let volumes = {}; // { 'YYYY-MM-DD': ordersReviewed } from optional "Daily Volume" sheet
+
+/* ---------- Explore state ---------- */
+let groupBy = 'dept';
+let filterField = 'dept';
+let activeFilters = []; // [{ key, value }]
+
+const BASE_DIMS = [
+  { key: 'site',        label: 'Site' },
+  { key: 'dept',        label: 'Department' },
+  { key: 'phone',       label: 'Phone', get: e => formatPhone(e.phone) },
+  { key: 'category',    label: 'Category' },
+  { key: 'charge',      label: 'Charge impact' },
+  { key: 'cause',       label: 'Root cause' },
+  { key: 'orderedBy',   label: 'Entered by' },
+  { key: 'order',       label: 'Order placed' },
+  { key: 'corrected',   label: 'Corrected to' },
+  { key: 'pair',        label: 'Order pair (placed → corrected)', get: e => (e.order && e.corrected) ? `${e.order} → ${e.corrected}` : '' },
+  { key: 'schedReason', label: 'Scheduling issue' },
+];
+
+/* Any Excel/CSV column the dashboard doesn't recognize is kept in e.extra
+   and shows up in the View by / Filter dropdowns automatically. */
+function getDims() {
+  const extraNames = new Set();
+  entries.forEach(e => Object.keys(e.extra || {}).forEach(k => extraNames.add(k)));
+  const extras = [...extraNames].sort().map(name => ({
+    key: 'x:' + name, label: name, get: e => (e.extra || {})[name]
+  }));
+  return BASE_DIMS.concat(extras);
+}
+
+function dimByKey(key) { return getDims().find(d => d.key === key); }
+
+function valueOf(dim, e) {
+  if (!dim) return '(blank)';
+  const raw = dim.get ? dim.get(e) : e[dim.key];
+  const v = String(raw ?? '').trim();
+  return v || '(blank)';
+}
+
+/* Normalizes phone numbers so 507-284-1234, (507) 284-1234 and 5072841234
+   group together. Anything not 10 digits (e.g. internal extensions) groups by its digits. */
+function formatPhone(p) {
+  const s = String(p ?? '').trim();
+  if (!s) return '';
+  let d = s.replace(/\D/g, '');
+  if (d.length === 11 && d[0] === '1') d = d.slice(1);
+  if (d.length === 10) return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6)}`;
+  return d || s;
+}
+
+function getView() {
+  return entries.filter(e => activeFilters.every(f => {
+    const dim = dimByKey(f.key);
+    if (!dim) return true;
+    return valueOf(dim, e) === f.value;
+  }));
+}
+
+function addFilter(key, value) {
+  activeFilters = activeFilters.filter(f => f.key !== key);
+  activeFilters.push({ key, value });
+  render();
+}
+
+function addFilterFromControls() {
+  const value = document.getElementById('filter-value').value;
+  if (!filterField || value === '') return;
+  addFilter(filterField, value);
+}
+
+function removeFilter(i) { activeFilters.splice(i, 1); render(); }
+function clearFilters() { activeFilters = []; render(); }
+
+/* ---------- Header mapping (Excel + CSV) ---------- */
+const ALIASES = {
+  date: 'date',
+  site: 'site',
+  orderplaced: 'order', orderasplaced: 'order', orderedas: 'order', order: 'order',
+  correctedto: 'corrected', corrected: 'corrected',
+  department: 'dept', orderingdepartment: 'dept', orderingdept: 'dept', dept: 'dept',
+  category: 'category', discrepancycategory: 'category', reason: 'category',
+  chargeimpact: 'charge', chargediscrepancy: 'charge', charge: 'charge',
+  deid: '_ignore',
+  rootcause: 'cause', cause: 'cause',
+  rootcausedetail: 'causeDetail', rootcausedetailifother: 'causeDetail', causedetail: 'causeDetail', otherdetail: 'causeDetail',
+  resolutiontimemin: 'time', resolutiontime: 'time', resolutiontimeminutes: 'time', time: 'time',
+  notes: 'notes',
+  schedulingissue: 'schedReason', schedulingreason: 'schedReason',
+  schedulingissuedetail: 'schedReasonDetail', schedulingissuedetails: 'schedReasonDetail', schedulingreasondetail: 'schedReasonDetail', schedulingissuedetailifother: 'schedReasonDetail',
+  orderedby: 'orderedBy', orderenteredby: 'orderedBy', enteredby: 'orderedBy',
+};
+
+function normKey(h) { return String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+function fieldFor(norm) {
+  if (!norm) return null;
+  if (ALIASES[norm]) return ALIASES[norm];
+  if (norm.includes('phone')) return 'phone';
+  return null;
+}
+
+function blankEntry() {
+  return { date:'', site:'', order:'', corrected:'', dept:'', phone:'', category:'', charge:'', cause:'',
+           causeDetail:'', orderedBy:'', time:'', notes:'', schedReason:'', schedReasonDetail:'', extra:{} };
+}
+
+function mapRow(headers, r) {
+  const e = blankEntry();
+  headers.forEach((h, idx) => {
+    const v = r[idx];
+    const field = fieldFor(normKey(h));
+    if (field === '_ignore') return;
+    if (field === 'date') e.date = excelDateToISO(v);
+    else if (field) e[field] = String(v ?? '').trim();
+    else if (h && String(v ?? '').trim()) e.extra[h] = String(v).trim();
+  });
+  return e;
+}
+
+/* ---------- Dropbox ---------- */
+function setSourceStatus(msg, cls) {
+  const el = document.getElementById('source-status');
+  el.textContent = msg;
+  el.className = 'source-status' + (cls ? ' ' + cls : '');
+}
+
+function toDirectDropboxUrl(url) {
+  let u = url.trim();
+  u = u.replace('www.dropbox.com', 'dl.dropboxusercontent.com');
+  u = u.replace(/([?&])dl=0/, '$1dl=1');
+  if (!/[?&]dl=1/.test(u) && u.includes('dropboxusercontent.com')) {
+    u += (u.includes('?') ? '&' : '?') + 'dl=1';
+  }
+  return u;
+}
+
+function excelDateToISO(v) {
+  if (v instanceof Date && !isNaN(v)) {
+    return v.toISOString().slice(0, 10);
+  }
+  if (typeof v === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(v);
+    if (parsed) {
+      const mm = String(parsed.m).padStart(2, '0');
+      const dd = String(parsed.d).padStart(2, '0');
+      return `${parsed.y}-${mm}-${dd}`;
+    }
+  }
+  return String(v || '').trim();
+}
+
+async function loadFromDropbox(silent) {
+  const rawUrl = document.getElementById('dropbox-url').value.trim();
+  if (!rawUrl) { setSourceStatus('Paste a Dropbox share link first.', 'err'); return; }
+
+  const directUrl = toDirectDropboxUrl(rawUrl);
+  if (!silent) setSourceStatus('Loading from Dropbox…');
+
+  try {
+    const resp = await fetch(directUrl);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const buf = await resp.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+    const sheet = wb.Sheets['Log'];
+    if (!sheet) throw new Error('No "Log" sheet found in that file.');
+
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+    if (!rows.length) throw new Error('The Log sheet is empty.');
+
+    const headers = rows[0].map(h => String(h ?? '').trim());
+    const recognized = headers.filter(h => fieldFor(normKey(h))).length;
+    const phoneHeader = headers.find(h => fieldFor(normKey(h)) === 'phone');
+    const newEntries = [];
+
+    if (recognized >= 4) {
+      // Header-based: reads columns by name, so column order in Excel doesn't matter.
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r || !r.some(v => String(v ?? '').trim())) continue;
+        const e = mapRow(headers, r);
+        if (!e.date) continue;
+        if (/example row/i.test(e.notes)) continue;
+        newEntries.push(e);
+      }
+    } else {
+      // Fallback: original fixed column positions.
+      for (let i = 2; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r || !r.length) continue;
+        const dateVal = excelDateToISO(r[0]);
+        const notesVal = String(r[10] || '');
+        if (!dateVal) continue;
+        if (notesVal.includes('Example row - delete before use')) continue;
+        newEntries.push(Object.assign(blankEntry(), {
+          date: dateVal, site: String(r[1] || ''), order: String(r[2] || ''), corrected: String(r[3] || ''),
+          dept: String(r[4] || ''), category: String(r[5] || ''), charge: String(r[6] || ''),
+          cause: String(r[7] || ''), causeDetail: String(r[8] || ''), time: String(r[9] || ''),
+          notes: notesVal, schedReason: String(r[11] || ''), schedReasonDetail: String(r[12] || ''),
+          orderedBy: String(r[13] || ''),
+        }));
+      }
+    }
+
+    entries = newEntries;
+
+    // Optional "Daily Volume" sheet: column A = Date, column B = orders reviewed
+    volumes = {};
+    const volSheet = wb.Sheets['Daily Volume'];
+    if (volSheet) {
+      const vr = XLSX.utils.sheet_to_json(volSheet, { header: 1, raw: true, defval: '' });
+      for (let i = 1; i < vr.length; i++) {
+        const d = excelDateToISO(vr[i][0]);
+        const n = Number(vr[i][1]);
+        if (d && n > 0) volumes[d] = (volumes[d] || 0) + n;
+      }
+    }
+
+    localStorage.setItem('dropbox-source-url', rawUrl);
+    render();
+    const phoneNote = phoneHeader ? ` Phone column: "${phoneHeader}".` : ' No phone column found.';
+    const volDays = Object.keys(volumes).length;
+    const volNote = volSheet ? ` Daily volume: ${volDays} day(s).` : ' No "Daily Volume" sheet.';
+    setSourceStatus(`Loaded ${entries.length} entries from Dropbox — last refreshed ${new Date().toLocaleTimeString()}.${phoneNote}${volNote}`, 'ok');
+  } catch (err) {
+    setSourceStatus('Could not load from Dropbox: ' + err.message, 'err');
+  }
+}
+
+/* ---------- Local storage ---------- */
+function loadData() {
+  try {
+    const raw = localStorage.getItem('discrepancy-entries');
+    entries = raw ? JSON.parse(raw) : [];
+  } catch (e) { entries = []; }
+  render();
+}
+
+function saveData() {
+  try { localStorage.setItem('discrepancy-entries', JSON.stringify(entries)); }
+  catch (e) { console.error('Save failed', e); }
+}
+
+/* ---------- Form ---------- */
+function toggleCauseDetail() {
+  const isOther = document.getElementById('f-cause').value === 'Other';
+  document.getElementById('f-cause-detail-wrap').style.display = isOther ? 'flex' : 'none';
+}
+
+function addEntry() {
+  const date = document.getElementById('f-date').value || new Date().toISOString().slice(0,10);
+  const site = document.getElementById('f-site').value;
+  const order = document.getElementById('f-order').value.trim();
+  const corrected = document.getElementById('f-corrected').value.trim();
+  const dept = document.getElementById('f-dept').value.trim();
+  const phone = document.getElementById('f-phone').value.trim();
+  const category = document.getElementById('f-category').value;
+  const charge = document.getElementById('f-charge').value;
+  const cause = document.getElementById('f-cause').value;
+  const causeDetail = cause === 'Other' ? document.getElementById('f-cause-detail').value.trim() : '';
+  const orderedBy = document.getElementById('f-orderedby').value;
+  const time = document.getElementById('f-time').value;
+  const notes = document.getElementById('f-notes').value.trim();
+
+  if (!site) { alert('Enter a site'); return; }
+  if (cause === 'Other' && !causeDetail) { alert('Enter a root cause detail for Other'); return; }
+
+  entries.push(Object.assign(blankEntry(), { date, site, order, corrected, dept, phone, category, charge, cause, causeDetail, orderedBy, time, notes }));
+  saveData();
+  ['f-order','f-corrected','f-dept','f-phone','f-time','f-notes','f-cause-detail'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('f-orderedby').value = '';
+  toggleCauseDetail();
+  render();
+}
+
+function deleteEntry(idx) {
+  entries.splice(idx, 1);
+  saveData();
+  render();
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s ?? '';
+  return d.innerHTML;
+}
+
+/* ---------- Render ---------- */
+function render() {
+  const view = getView();
+  renderStats(view);
+  renderDept(view);
+  renderEntered(view);
+  renderPhones(view);
+  renderExplore(view);
+  renderTable(view);
+  renderCharts(view);
+  renderRepeats(view);
+  updateLists();
+}
+
+/* ---------- Shared chart helpers ---------- */
+const C_TICK = '#8b96ac', C_GRID = '#232d40', C_TEXT = '#e8ecf3';
+function pct(n, d) { return d ? Math.round(n / d * 100) : 0; }
+function clickable(chart, handler) {
+  // setTimeout: let Chart.js finish handling the click before render() destroys and rebuilds it
+  chart.options.onClick = (evt, els) => { if (els.length) { const el = els[0]; setTimeout(() => handler(el), 0); } };
+  chart.options.onHover = (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; };
+  chart.update();
+}
+
+/* ---------- Errors by department ---------- */
+let chartDept, deptValues = [];
+function renderDept(view) {
+  if (chartDept) { chartDept.destroy(); chartDept = null; }
+  const dim = dimByKey('dept');
+  const groups = {};
+  let blank = 0;
+  view.forEach(e => {
+    const v = valueOf(dim, e);
+    if (v === '(blank)') { blank++; return; }
+    if (!groups[v]) groups[v] = { count: 0, yes: 0 };
+    groups[v].count++;
+    if (e.charge === 'Yes') groups[v].yes++;
+  });
+  const limit = parseInt(document.getElementById('dept-limit').value, 10);
+  const all = Object.entries(groups).sort((a,b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
+  const rows = limit ? all.slice(0, limit) : all;
+  deptValues = rows.map(r => r[0]);
+
+  const box = document.getElementById('dept-box');
+  const canvas = document.getElementById('chartDept');
+  box.style.height = Math.max(160, rows.length * 26 + 60) + 'px';
+  if (rows.length) {
+    chartDept = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: deptValues, datasets: [
+        { label: 'Charge-impacting', data: rows.map(r => r[1].yes), backgroundColor: '#f0574a', borderRadius: 4, stack: 's' },
+        { label: 'Other', data: rows.map(r => r[1].count - r[1].yes), backgroundColor: '#4a90d9', borderRadius: 4, stack: 's' },
+      ] },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: C_TICK, font: { size: 11, family: 'Inter' }, boxWidth: 10 } },
+          tooltip: { mode: 'index', callbacks: { footer: items => {
+            const g = groups[items[0].label];
+            return `Total: ${g.count} (${pct(g.count, view.length)}% of shown)`;
+          } } }
+        },
+        scales: { x: { stacked: true, ticks: { color: C_TICK, stepSize: 1 }, grid: { color: C_GRID } },
+                  y: { stacked: true, ticks: { color: C_TEXT, font: { size: 11 } }, grid: { display: false } } } }
+    });
+    clickable(chartDept, el => addFilter('dept', deptValues[el.index]));
+  } else {
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  }
+  const shown = limit && all.length > limit ? `Showing ${limit} of ${all.length} departments.` : `${all.length} department${all.length === 1 ? '' : 's'}.`;
+  document.getElementById('dept-note').textContent = view.length
+    ? `${shown} ${blank} entr${blank === 1 ? 'y' : 'ies'} with no department not counted.` : '';
+}
+
+/* ---------- Who entered the order ---------- */
+let chartDeptEntered, enteredValues = [];
+function enteredColor(label) {
+  const s = label.toLowerCase();
+  if (s.includes('proxy') || s.includes('appoint')) return '#f5a623';
+  if (s.includes('provider')) return '#4a90d9';
+  if (s.includes('sched')) return '#2dd4bf';
+  return '#5b6478';
+}
+function renderEntered(view) {
+  const dim = dimByKey('orderedBy');
+  const groups = {};
+  view.forEach(e => {
+    const v = valueOf(dim, e);
+    if (!groups[v]) groups[v] = { count: 0, yes: 0 };
+    groups[v].count++;
+    if (e.charge === 'Yes') groups[v].yes++;
+  });
+  const sorted = Object.entries(groups).sort((a,b) => b[1].count - a[1].count);
+  enteredValues = sorted.map(s => s[0]);
+
+  const wrap = document.getElementById('enteredWrap');
+  wrap.innerHTML = sorted.length ? `<table>
+    <tr><th>Entered by</th><th>Count</th><th>% of shown</th><th>Charge-impacting</th></tr>
+    ${sorted.map(([v, g], i) => `<tr class="breakdown-row" onclick="addFilter('orderedBy', enteredValues[${i}])">
+      <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${enteredColor(v)};margin-right:8px;"></span>${escapeHtml(v)}</td>
+      <td class="num">${g.count}</td><td class="num">${pct(g.count, view.length)}%</td>
+      <td class="num ${g.yes ? 'yes' : 'no'}">${g.yes} (${pct(g.yes, g.count)}%)</td>
+    </tr>`).join('')}
+  </table>` : '<div class="empty">No entries match the current filters.</div>';
+
+  // Top 10 departments, split by who entered the order
+  if (chartDeptEntered) { chartDeptEntered.destroy(); chartDeptEntered = null; }
+  const deptDim = dimByKey('dept');
+  const byDept = {};
+  view.forEach(e => {
+    const d = valueOf(deptDim, e);
+    if (d === '(blank)') return;
+    if (!byDept[d]) byDept[d] = { total: 0 };
+    byDept[d].total++;
+    const w = valueOf(dim, e);
+    byDept[d][w] = (byDept[d][w] || 0) + 1;
+  });
+  const topDepts = Object.entries(byDept).sort((a,b) => b[1].total - a[1].total).slice(0, 10).map(d => d[0]);
+  const box = document.getElementById('dept-entered-box');
+  const canvas = document.getElementById('chartDeptEntered');
+  box.style.height = Math.max(160, topDepts.length * 26 + 80) + 'px';
+  if (!topDepts.length) { canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); return; }
+  chartDeptEntered = new Chart(canvas, {
+    type: 'bar',
+    data: { labels: topDepts, datasets: enteredValues.map(w => ({
+      label: w, data: topDepts.map(d => byDept[d][w] || 0), backgroundColor: enteredColor(w), borderRadius: 3, stack: 's'
+    })) },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: C_TICK, font: { size: 11, family: 'Inter' }, boxWidth: 10 } },
+        title: { display: true, text: 'Top 10 departments by who entered the order', color: C_TEXT, font: { size: 12, family: 'Inter' } }
+      },
+      scales: { x: { stacked: true, ticks: { color: C_TICK, stepSize: 1 }, grid: { color: C_GRID } },
+                y: { stacked: true, ticks: { color: C_TEXT, font: { size: 11 } }, grid: { display: false } } } }
+  });
+  clickable(chartDeptEntered, el => {
+    activeFilters = activeFilters.filter(f => f.key !== 'dept' && f.key !== 'orderedBy');
+    activeFilters.push({ key: 'dept', value: topDepts[el.index] }, { key: 'orderedBy', value: enteredValues[el.datasetIndex] });
+    render();
+  });
+}
+
+/* ---------- Phone numbers ---------- */
+let phoneValues = [];
+function renderPhones(view) {
+  const dim = dimByKey('phone');
+  const groups = {};
+  view.forEach(e => {
+    const v = valueOf(dim, e);
+    if (v === '(blank)') return;
+    if (!groups[v]) groups[v] = { count: 0, yes: 0, depts: {}, by: {} };
+    const g = groups[v];
+    g.count++;
+    if (e.charge === 'Yes') g.yes++;
+    if (e.dept) g.depts[e.dept] = (g.depts[e.dept] || 0) + 1;
+    const w = e.orderedBy || 'Unspecified';
+    g.by[w] = (g.by[w] || 0) + 1;
+  });
+  const q = document.getElementById('phone-search').value.replace(/\D/g, '');
+  let sorted = Object.entries(groups).sort((a,b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
+  if (q) sorted = sorted.filter(([v]) => v.replace(/\D/g, '').includes(q));
+  else sorted = sorted.slice(0, 25);
+  phoneValues = sorted.map(s => s[0]);
+  const top = obj => { const t = Object.entries(obj).sort((a,b) => b[1]-a[1])[0]; return t ? t[0] : '—'; };
+
+  const wrap = document.getElementById('phoneWrap');
+  wrap.innerHTML = sorted.length ? `<table>
+    <tr><th>Phone</th><th>Count</th><th>% of shown</th><th>Charge-impacting</th><th>Top department</th><th>Usually entered by</th></tr>
+    ${sorted.map(([v, g], i) => `<tr class="breakdown-row" onclick="addFilter('phone', phoneValues[${i}])">
+      <td class="num">${escapeHtml(v)}</td><td class="num">${g.count}</td><td class="num">${pct(g.count, view.length)}%</td>
+      <td class="num ${g.yes ? 'yes' : 'no'}">${g.yes}</td>
+      <td>${escapeHtml(top(g.depts))}</td><td>${escapeHtml(top(g.by))}</td>
+    </tr>`).join('')}
+  </table>` : `<div class="empty">${q ? 'No numbers match that search.' : 'No phone numbers in the current view.'}</div>`;
+}
+
+function renderRepeats(view) {
+  const wrap = document.getElementById('repeatWrap');
+  const groups = {};
+  view.forEach(e => {
+    if (!e.order || !e.corrected) return;
+    const dept = e.dept || '(blank)';
+    const k = dept + '||' + e.order + '||' + e.corrected;
+    if (!groups[k]) groups[k] = { dept, pair: `${e.order} → ${e.corrected}`, count: 0, yes: 0, last: '' };
+    groups[k].count++;
+    if (e.charge === 'Yes') groups[k].yes++;
+    if (e.date > groups[k].last) groups[k].last = e.date;
+  });
+  const rows = Object.values(groups).filter(g => g.count >= 3).sort((a,b) => b.count - a.count);
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">No repeats yet (needs 3+ of the same department + order pair).</div>'; return; }
+  wrap.innerHTML = `<table>
+    <tr><th>Department</th><th>Order pair</th><th>Count</th><th>Charge-impacting</th><th>Most recent</th></tr>
+    ${rows.map(g => `<tr>
+      <td>${escapeHtml(g.dept)}</td><td>${escapeHtml(g.pair)}</td>
+      <td class="num">${g.count}</td><td class="num ${g.yes ? 'yes' : 'no'}">${g.yes}</td>
+      <td class="num">${escapeHtml(g.last)}</td>
+    </tr>`).join('')}
+  </table>`;
+}
+
+function setDatalist(id, values) {
+  document.getElementById(id).innerHTML = values.map(v => `<option value="${escapeHtml(v)}">`).join('');
+}
+
+function updateLists() {
+  const uniq = key => [...new Set(entries.map(e => e[key]).filter(Boolean))].sort();
+  setDatalist('order-list', uniq('order'));
+  setDatalist('corrected-list', uniq('corrected'));
+  setDatalist('dept-list', uniq('dept'));
+  setDatalist('phone-list', uniq('phone'));
+}
+
+function renderStats(view) {
+  const total = view.length;
+  const chargeImpact = view.filter(e => e.charge === 'Yes').length;
+  const chargePct = total ? Math.round((chargeImpact/total)*100) : 0;
+  const sites = new Set(view.map(e => e.site).filter(Boolean)).size;
+  const topCat = topOf(view.map(e => e.category).filter(Boolean));
+
+  const times = view.map(e => parseFloat(e.time)).filter(n => !isNaN(n));
+  const avgTime = times.length ? (times.reduce((a,b) => a+b, 0) / times.length).toFixed(1) : null;
+
+  let rateCard = '';
+  const volDays = Object.keys(volumes);
+  if (volDays.length) {
+    const reviewed = volDays.reduce((s, d) => s + volumes[d], 0);
+    const errs = view.filter(e => volumes[e.date]).length;
+    const rate = reviewed ? (errs / reviewed * 100).toFixed(2) : '0.00';
+    rateCard = `<div class="stat warn"><div class="label">Error rate</div><div class="value">${rate}%<span style="font-size:14px;color:var(--text-faint);"> of ${reviewed.toLocaleString()}</span></div></div>`;
+  }
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="label">Total logged</div><div class="value">${total}</div></div>
+    <div class="stat warn"><div class="label">Charge-impacting</div><div class="value">${chargeImpact}<span style="font-size:14px;color:var(--text-faint);"> / ${chargePct}%</span></div></div>
+    ${rateCard}
+    <div class="stat"><div class="label">Sites represented</div><div class="value">${sites}</div></div>
+    <div class="stat"><div class="label">Avg resolution</div><div class="value">${avgTime ?? '—'}${avgTime ? '<span style="font-size:14px;color:var(--text-faint);"> min</span>' : ''}</div></div>
+    <div class="stat"><div class="label">Top category</div><div class="value small">${escapeHtml(topCat || '—')}</div></div>
+  `;
+}
+
+function topOf(arr) {
+  if (!arr.length) return null;
+  const counts = {};
+  arr.forEach(v => counts[v] = (counts[v]||0)+1);
+  return Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
+}
+
+function fillSelect(id, dims, selected) {
+  document.getElementById(id).innerHTML = dims.map(d =>
+    `<option value="${escapeHtml(d.key)}"${d.key === selected ? ' selected' : ''}>${escapeHtml(d.label)}</option>`
+  ).join('');
+}
+
+let chartExplore;
+function renderExplore(view) {
+  const dims = getDims();
+  if (!dims.some(d => d.key === groupBy)) groupBy = 'dept';
+  if (!dims.some(d => d.key === filterField)) filterField = 'dept';
+  fillSelect('group-by', dims, groupBy);
+  fillSelect('filter-field', dims, filterField);
+
+  // Filter value options: values of the chosen field within the current view, most common first
+  const fDim = dimByKey(filterField);
+  const fCounts = {};
+  view.forEach(e => { const v = valueOf(fDim, e); fCounts[v] = (fCounts[v]||0)+1; });
+  const fSorted = Object.entries(fCounts).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+  document.getElementById('filter-value').innerHTML = fSorted.length
+    ? fSorted.map(([v,n]) => `<option value="${escapeHtml(v)}">${escapeHtml(v)} (${n})</option>`).join('')
+    : '<option value="">No values</option>';
+
+  // Chips
+  const chipsEl = document.getElementById('filter-chips');
+  if (!activeFilters.length) {
+    chipsEl.innerHTML = '<span style="font-size:12px;color:var(--text-faint);">No filters — showing everything.</span>';
+  } else {
+    chipsEl.innerHTML = activeFilters.map((f, i) => {
+      const d = dimByKey(f.key);
+      return `<span class="chip"><b>${escapeHtml(d ? d.label : f.key)}:</b> ${escapeHtml(f.value)}<button title="Remove filter" onclick="removeFilter(${i})">×</button></span>`;
+    }).join('');
+  }
+  const clearBtn = document.getElementById('clear-filters-btn');
+  clearBtn.disabled = !activeFilters.length;
+  clearBtn.style.opacity = activeFilters.length ? '1' : '0.4';
+  clearBtn.style.cursor = activeFilters.length ? 'pointer' : 'default';
+
+  document.getElementById('view-count').textContent = `Showing ${view.length} of ${entries.length}`;
+
+  // Group the current view by the chosen field
+  const gDim = dimByKey(groupBy);
+  const groups = {};
+  view.forEach(e => {
+    const v = valueOf(gDim, e);
+    if (!groups[v]) groups[v] = { count: 0, yes: 0, cats: {} };
+    groups[v].count++;
+    if (e.charge === 'Yes') groups[v].yes++;
+    if (e.category) groups[v].cats[e.category] = (groups[v].cats[e.category]||0)+1;
+  });
+  const sorted = Object.entries(groups).sort((a,b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
+
+  // Chart
+  if (chartExplore) { chartExplore.destroy(); chartExplore = null; }
+  const box = document.getElementById('explore-box');
+  const canvas = document.getElementById('chartExplore');
+  box.style.height = Math.max(160, sorted.length * 28 + 50) + 'px';
+  if (sorted.length) {
+    const tickColor = '#8b96ac', gridColor = '#232d40', textColor = '#e8ecf3';
+    chartExplore = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: sorted.map(s => s[0]),
+        datasets: [
+          { label: 'Charge-impacting', data: sorted.map(s => s[1].yes), backgroundColor: '#f0574a', borderRadius: 4, stack: 's' },
+          { label: 'Other', data: sorted.map(s => s[1].count - s[1].yes), backgroundColor: '#2dd4bf', borderRadius: 4, stack: 's' },
+        ]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        onClick: (evt, els, chart) => { if (els.length) addFilter(groupBy, chart.data.labels[els[0].index]); },
+        onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        plugins: {
+          legend: { position: 'bottom', labels: { color: tickColor, font: { size: 11, family: 'Inter' }, boxWidth: 10 } },
+          title: { display: true, text: 'By ' + (gDim ? gDim.label.toLowerCase() : ''), color: textColor, font: { size: 12, family: 'Inter' } }
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: tickColor, stepSize: 1 }, grid: { color: gridColor } },
+          y: { stacked: true, ticks: { color: textColor, font: { size: 11 } }, grid: { display: false } }
+        }
+      }
+    });
+  } else {
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Breakdown table
+  const wrap = document.getElementById('breakdownWrap');
+  if (!sorted.length) { wrap.innerHTML = '<div class="empty">No entries match the current filters.</div>'; return; }
+  const total = view.length;
+  wrap.innerHTML = `<table>
+    <tr><th>${escapeHtml(gDim ? gDim.label : '')}</th><th>Count</th><th>% of shown</th><th>Charge-impacting</th><th>Top category</th></tr>
+    ${sorted.map(([v, g], i) => `<tr class="breakdown-row" onclick="addFilter(groupBy, exploreValues[${i}])">
+      <td>${escapeHtml(v)}</td>
+      <td class="num">${g.count}</td>
+      <td class="num">${Math.round(g.count / total * 100)}%</td>
+      <td class="num ${g.yes ? 'yes' : 'no'}">${g.yes} (${Math.round(g.yes / g.count * 100)}%)</td>
+      <td>${escapeHtml(topOf(Object.entries(g.cats).flatMap(([c, n]) => Array(n).fill(c))) || '—')}</td>
+    </tr>`).join('')}
+  </table>`;
+  exploreValues = sorted.map(s => s[0]);
+}
+let exploreValues = [];
+
+function renderTable(view) {
+  const wrap = document.getElementById('tableWrap');
+  if (!entries.length) { wrap.innerHTML = '<div class="empty">No entries yet. Log one above or import a CSV.</div>'; return; }
+  if (!view.length) { wrap.innerHTML = '<div class="empty">No entries match the current filters.</div>'; return; }
+  const rows = view.slice().reverse().map(e => {
+    const realIdx = entries.indexOf(e);
+    return `<tr>
+      <td>${escapeHtml(e.date)}</td>
+      <td>${escapeHtml(e.site)}</td>
+      <td>${escapeHtml(e.order)}</td>
+      <td>${escapeHtml(e.corrected||'')}</td>
+      <td>${escapeHtml(e.dept||'')}</td>
+      <td>${escapeHtml(formatPhone(e.phone))}</td>
+      <td>${escapeHtml(e.category)}</td>
+      <td class="${e.charge==='Yes'?'yes':e.charge==='Unknown'?'unk':'no'}">${escapeHtml(e.charge)}</td>
+      <td>${escapeHtml(e.cause)}${e.causeDetail ? ' — ' + escapeHtml(e.causeDetail) : ''}${e.schedReason ? ' (' + escapeHtml(e.schedReason) + (e.schedReasonDetail ? ': ' + escapeHtml(e.schedReasonDetail) : '') + ')' : ''}</td>
+      <td>${escapeHtml(e.orderedBy||'')}</td>
+      <td>${escapeHtml(e.time||'')}</td>
+      <td>${escapeHtml(e.notes||'')}</td>
+      <td><button class="del" onclick="deleteEntry(${realIdx})">delete</button></td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `<table>
+    <tr><th>Date</th><th>Site</th><th>Order placed</th><th>Corrected to</th><th>Dept</th><th>Phone</th><th>Category</th><th>Charge</th><th>Root cause</th><th>Entered by</th><th>Time</th><th>Notes</th><th></th></tr>
+    ${rows}
+  </table>`;
+}
+
+let chartCat, chartSite, chartCharge, chartCause, chartOrderedBy, chartPairs, chartTrend, chartResTime, chartDow;
+function renderCharts(view) {
+  const catCounts = {};
+  const siteCounts = {};
+  const chargeCounts = { Yes: 0, No: 0, Unknown: 0 };
+  const causeCounts = {};
+  const orderedByCounts = {};
+  const pairCounts = {};
+  const weekCounts = {};
+  const timeByCat = {}; // { category: [sum, n] }
+  const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const dowCounts = [0,0,0,0,0,0,0];
+
+  view.forEach(e => {
+    const t = parseFloat(e.time);
+    if (!isNaN(t) && e.category) {
+      if (!timeByCat[e.category]) timeByCat[e.category] = [0, 0];
+      timeByCat[e.category][0] += t; timeByCat[e.category][1]++;
+    }
+    if (e.date) {
+      const dd = new Date(e.date + 'T00:00:00');
+      if (!isNaN(dd)) dowCounts[(dd.getDay() + 6) % 7]++;
+    }
+    catCounts[e.category] = (catCounts[e.category]||0)+1;
+    siteCounts[e.site] = (siteCounts[e.site]||0)+1;
+    if (chargeCounts[e.charge] !== undefined) chargeCounts[e.charge]++;
+    causeCounts[e.cause] = (causeCounts[e.cause]||0)+1;
+    const orderedByLabel = e.orderedBy || 'Unspecified';
+    orderedByCounts[orderedByLabel] = (orderedByCounts[orderedByLabel]||0)+1;
+    if (e.order && e.corrected) {
+      const key = `${e.order} → ${e.corrected}`;
+      pairCounts[key] = (pairCounts[key]||0)+1;
+    }
+    if (e.date) {
+      const d = new Date(e.date + 'T00:00:00');
+      if (!isNaN(d)) {
+        const monday = new Date(d);
+        monday.setDate(d.getDate() - ((d.getDay()+6)%7));
+        const wk = monday.toISOString().slice(0,10);
+        weekCounts[wk] = (weekCounts[wk]||0)+1;
+      }
+    }
+  });
+
+  const catLabels = Object.keys(catCounts);
+  const siteLabels = Object.keys(siteCounts);
+  const causeLabels = Object.keys(causeCounts);
+  const orderedByLabels = Object.keys(orderedByCounts);
+  const weekLabels = Object.keys(weekCounts).sort();
+  const pairEntries = Object.entries(pairCounts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+
+  [chartCat, chartSite, chartCharge, chartCause, chartOrderedBy, chartPairs, chartTrend, chartResTime, chartDow].forEach(c => c && c.destroy());
+  chartPairs = null;
+
+  const tickColor = '#8b96ac', gridColor = '#232d40', textColor = '#e8ecf3';
+  const fontOpts = { family: 'Inter' };
+
+  const resLabels = Object.keys(timeByCat);
+  chartResTime = new Chart(document.getElementById('chartResTime'), {
+    type: 'bar',
+    data: { labels: resLabels, datasets: [{ label: 'Avg min', data: resLabels.map(l => +(timeByCat[l][0] / timeByCat[l][1]).toFixed(1)), backgroundColor: '#4a90d9', borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: resLabels.length ? 'Avg resolution time by category (min)' : 'Avg resolution time — no times logged yet', color: textColor, font: {size: 12, ...fontOpts} } },
+      scales: { x: { ticks: { color: tickColor, font:{size:10} }, grid: { color: gridColor } }, y: { ticks: { color: tickColor }, grid: { color: gridColor } } } }
+  });
+
+  chartDow = new Chart(document.getElementById('chartDow'), {
+    type: 'bar',
+    data: { labels: DOW, datasets: [{ label: 'Count', data: dowCounts, backgroundColor: '#f5a623', borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'By day of week', color: textColor, font: {size: 12, ...fontOpts} } },
+      scales: { x: { ticks: { color: tickColor, font:{size:10} }, grid: { color: gridColor } }, y: { ticks: { color: tickColor, stepSize:1 }, grid: { color: gridColor } } } }
+  });
+
+  chartCat = new Chart(document.getElementById('chartCategory'), {
+    type: 'bar',
+    data: { labels: catLabels, datasets: [{ label: 'Count', data: catLabels.map(l=>catCounts[l]), backgroundColor: '#2dd4bf', borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'By category', color: textColor, font: {size: 12, ...fontOpts} } },
+      scales: { x: { ticks: { color: tickColor, font:{size:10} }, grid: { color: gridColor } }, y: { ticks: { color: tickColor, stepSize:1 }, grid: { color: gridColor } } } }
+  });
+
+  chartSite = new Chart(document.getElementById('chartSite'), {
+    type: 'bar',
+    data: { labels: siteLabels, datasets: [{ label: 'Count', data: siteLabels.map(l=>siteCounts[l]), backgroundColor: '#f5a623', borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'By site', color: textColor, font: {size: 12, ...fontOpts} } },
+      scales: { x: { ticks: { color: tickColor, font:{size:10} }, grid: { color: gridColor } }, y: { ticks: { color: tickColor, stepSize:1 }, grid: { color: gridColor } } } }
+  });
+
+  chartCharge = new Chart(document.getElementById('chartCharge'), {
+    type: 'doughnut',
+    data: { labels: ['Yes','No','Unknown'], datasets: [{ data: [chargeCounts.Yes, chargeCounts.No, chargeCounts.Unknown], backgroundColor: ['#f0574a','#3a4256','#f5a623'], borderColor: '#121826', borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: {
+      legend: { position: 'bottom', labels: { color: tickColor, font: {size: 11, ...fontOpts}, boxWidth: 10, padding: 12 } },
+      title: { display: true, text: 'By charge impact', color: textColor, font: {size: 12, ...fontOpts} } } }
+  });
+
+  chartCause = new Chart(document.getElementById('chartCause'), {
+    type: 'bar',
+    data: { labels: causeLabels, datasets: [{ label: 'Count', data: causeLabels.map(l=>causeCounts[l]), backgroundColor: '#4a90d9', borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'By root cause', color: textColor, font: {size: 12, ...fontOpts} } },
+      scales: { x: { ticks: { color: tickColor, font:{size:10} }, grid: { color: gridColor } }, y: { ticks: { color: tickColor, stepSize:1 }, grid: { color: gridColor } } } }
+  });
+
+  chartOrderedBy = new Chart(document.getElementById('chartOrderedBy'), {
+    type: 'bar',
+    data: { labels: orderedByLabels, datasets: [{ label: 'Count', data: orderedByLabels.map(l=>orderedByCounts[l]), backgroundColor: '#2dd4bf', borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'By order entered', color: textColor, font: {size: 12, ...fontOpts} } },
+      scales: { x: { ticks: { color: tickColor, font:{size:10} }, grid: { color: gridColor } }, y: { ticks: { color: tickColor, stepSize:1 }, grid: { color: gridColor } } } }
+  });
+
+  const pairsEl = document.getElementById('chartPairs');
+  if (!pairEntries.length) {
+    pairsEl.getContext('2d').clearRect(0,0,pairsEl.width,pairsEl.height);
+  } else {
+    chartPairs = new Chart(pairsEl, {
+      type: 'bar',
+      data: { labels: pairEntries.map(p=>p[0]), datasets: [{ label: 'Count', data: pairEntries.map(p=>p[1]), backgroundColor: '#2dd4bf', borderRadius: 4 }] },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+        scales: { x: { ticks: { color: tickColor, stepSize:1 }, grid: { color: gridColor } }, y: { ticks: { color: textColor, font:{size:11} }, grid: { display: false } } } }
+    });
+  }
+
+  chartTrend = new Chart(document.getElementById('chartTrend'), {
+    type: 'line',
+    data: { labels: weekLabels, datasets: [{ label: 'Entries', data: weekLabels.map(w=>weekCounts[w]), borderColor: '#2dd4bf', backgroundColor: 'rgba(45,212,191,0.12)', fill: true, tension: 0.3, pointRadius: 3, pointBackgroundColor: '#2dd4bf' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { ticks: { color: tickColor, font:{size:10} }, grid: { display: false } }, y: { ticks: { color: tickColor, stepSize:1 }, grid: { color: gridColor } } } }
+  });
+}
+
+/* ---------- CSV ---------- */
+function exportCSV() {
+  const extraNames = [...new Set(entries.flatMap(e => Object.keys(e.extra || {})))].sort();
+  const headers = ['Date','Site','OrderPlaced','CorrectedTo','Department','Category','ChargeImpact','RootCause','RootCauseDetail','OrderedBy','ResolutionTimeMin','Notes','SchedulingIssue','SchedulingIssueDetail','Phone', ...extraNames];
+  const rows = entries.map(e => [e.date,e.site,e.order,e.corrected,e.dept,e.category,e.charge,e.cause,e.causeDetail,e.orderedBy,e.time,e.notes,e.schedReason,e.schedReasonDetail,e.phone, ...extraNames.map(n => (e.extra||{})[n])]
+    .map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
+  const csv = '\uFEFF' + headers.map(h => `"${h.replace(/"/g,'""')}"`).join(',') + '\r\n' + rows.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'discrepancy_log.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const text = ev.target.result.replace(/^\uFEFF/, '');
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+    if (lines.length < 2) return;
+    const headers = parseCSVLine(lines[0]).map(h => h.trim());
+    for (let i = 1; i < lines.length; i++) {
+      const e = mapRow(headers, parseCSVLine(lines[i]));
+      if (/example row/i.test(e.notes)) continue;
+      if (!e.charge) e.charge = 'No';
+      entries.push(e);
+    }
+    saveData();
+    render();
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+function parseCSVLine(line) {
+  const out = []; let cur = ''; let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
+      else if (c === '"') { inQ = false; }
+      else cur += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ',') { out.push(cur); cur = ''; }
+      else cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+loadData();
+
+const savedDropboxUrl = localStorage.getItem('dropbox-source-url');
+if (savedDropboxUrl) {
+  document.getElementById('dropbox-url').value = savedDropboxUrl;
+  loadFromDropbox(true);
+}
+</script>
+</body>
+</html>
