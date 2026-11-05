@@ -40,16 +40,40 @@
   .opt {
     background: var(--panel); border: 1px solid var(--border); color: var(--text);
     border-radius: 6px; padding: 7px 10px; font-size: 12px; text-align: left;
-    cursor: pointer; transition: all 0.1s;
+    cursor: pointer; transition: all 0.1s; display: flex; align-items: center; gap: 8px;
   }
   .opt:hover { border-color: var(--teal); background: var(--panel-2); }
   .opt.selected { border-color: var(--teal); background: rgba(45,212,191,0.1); color: var(--teal); }
+  .opt.kb { border-color: var(--teal); background: var(--panel-2); }
+  .opt .key {
+    font-family: Consolas, monospace; font-size: 10px; color: var(--text-faint);
+    border: 1px solid var(--border-hi); border-radius: 4px; padding: 0 4px; min-width: 16px; text-align: center;
+  }
 
   input[type=text], input[type=date], input[type=number] {
     background: var(--panel); border: 1px solid var(--border); color: var(--text);
     border-radius: 6px; padding: 8px 10px; font-size: 12px; width: 100%;
   }
   input:focus { outline: none; border-color: var(--teal); }
+  input.matched { border-color: var(--teal); background: rgba(45,212,191,0.08); }
+
+  .ac-wrap { position: relative; }
+  .ac-list {
+    position: absolute; top: 100%; left: 0; right: 0; margin-top: 3px;
+    background: var(--panel-2); border: 1px solid var(--border-hi);
+    border-radius: 6px; max-height: 180px; overflow-y: auto; z-index: 10;
+  }
+  .ac-item {
+    padding: 6px 10px; font-size: 11.5px; cursor: pointer; color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .ac-item:last-child { border-bottom: none; }
+  .ac-item:hover, .ac-item.hi { background: rgba(45,212,191,0.12); color: var(--teal); }
+  .ac-more { padding: 5px 10px; font-size: 10px; color: var(--text-faint); }
+  .ac-tag, .hint {
+    font-size: 9.5px; color: var(--text-faint); margin-top: 4px; letter-spacing: 0.02em; line-height: 1.4;
+  }
+  .ac-tag { color: var(--teal); }
 
   .nav {
     display: flex; gap: 6px; margin-top: 8px; flex-shrink: 0;
@@ -87,7 +111,7 @@
   <div class="footer">
     <span id="count">0 logged</span>
     <div>
-      <button onclick="openNumbersManager()">Numbers</button>
+      <button onclick="setNextID()">Set next #</button>
       <button onclick="clearAll()">Clear all</button>
       <button onclick="exportCSV()">Export CSV</button>
     </div>
@@ -95,13 +119,21 @@
 </div>
 
 <script>
+/* ===================== Keyboard cheat sheet =====================
+   Choice steps:   1-9 (0 = 10th) pick an option · Up/Down + Enter also work
+   Exam names:     type a few letters of each word, e.g. "hip pel bil 3"
+                   Up/Down to move · Enter or Tab to accept · "/" to add a 2nd exam
+   Notes:          splitx / combx / neisx expand after Space, Tab, Enter or punctuation
+   Any step:       Enter = Next (or Skip if optional and empty) · Esc = Back
+   Done screen:    Enter = Save entry
+   ================================================================ */
+
 const FIELDS_ORDER_ERROR = [
-  { key: 'date', label: 'Date', type: 'date', default: () => new Date().toISOString().slice(0,10) },
   { key: 'site', label: 'Site', type: 'choice', options: ['Ch2','Go14','SMOP','Go15E','NW','NE','SE','KAKH','Peds','Baldwin','DAHLC'] },
   { key: 'order', label: 'Order as placed', type: 'text' },
   { key: 'corrected', label: 'Corrected to', type: 'text' },
   { key: 'dept', label: 'Ordering department', type: 'text', optional: true },
-  { key: 'orderPhone', label: 'Ordering phone number', type: 'text', optional: true },
+  { key: 'phone', label: 'Ordering phone number', type: 'text', optional: true },
   { key: 'category', label: 'Discrepancy category', type: 'choice', options: [
     'Order name/view count mismatch','Order views vs. protocol mismatch','Incorrect order (wrong exam type)',
     'Prerequisite not met','Other'] },
@@ -109,79 +141,175 @@ const FIELDS_ORDER_ERROR = [
 ];
 
 const FIELDS_SCHEDULING_ERROR = [
-  { key: 'date', label: 'Date', type: 'date', default: () => new Date().toISOString().slice(0,10) },
   { key: 'site', label: 'Site', type: 'choice', options: ['Ch2','Go14','SMOP','Go15E','NW','NE','SE','KAKH','Peds','Baldwin','DAHLC'] },
-  { key: 'schedReason', label: 'Scheduling issue', type: 'choice', options: ['Inconvenient','Separated from other exams','Scheduled in area that cannot do','Other'] },
-  { key: 'dept', label: 'Ordering department', type: 'text', optional: true },
-  { key: 'orderPhone', label: 'Ordering phone number', type: 'text', optional: true },
+  { key: 'schedReason', label: 'Scheduling issue reason', type: 'choice', options: [
+    'Separated from other exams','Wrong location entered at scheduling','Location unavailable / capacity','Other'] },
+  { key: 'dept', label: 'Ordering department', type: 'text' },
+  { key: 'origLocation', label: 'Original location', type: 'choice', options: ['Ch2','Go14','SMOP','Go15E','NW','NE','SE','KAKH','Peds','Baldwin','DAHLC'] },
+  { key: 'corrLocation', label: 'Corrected location', type: 'choice', options: ['Ch2','Go14','SMOP','Go15E','NW','NE','SE','KAKH','Peds','Baldwin','DAHLC'] },
+  { key: 'phone', label: 'Ordering phone number', type: 'text', optional: true },
   { key: 'charge', label: 'Charge impact', type: 'choice', options: ['Yes','No','Unknown'] },
 ];
 
 const ERROR_TYPE_STEP = { key: 'errorType', label: 'Error type', type: 'choice', options: ['Order Error', 'Scheduling Error'] };
 
+// ---- Notes shorthand ----
+// Type the code, then Space / Tab / Enter / punctuation, and it expands.
+// Add a line here to add a code: code: 'full text',
+const NOTE_SHORTHAND = {
+  combx:  'Unilateral exams combined to bilateral.',
+  neisx:  'Changed to reflect views selected by provider for FAI',
+  splitx: 'Order split to reflect Standing EOS and Supine Standard xray as requested',
+};
+
+// ---- Exam name list (type-ahead source) ----
+const EXAM_LIST = ["DX abdomen 1 view", "DX abdomen 4 views", "DX abdomen portable AP 1 view", "DX abdomen portable AP w/decub 2 views", "DX abdomen supine and upright 2 views", "DX abdomen supine w/upright and decub 3 views", "DX abdomen supine w/upright or decub 2 views", "DX acromioclavicular joints weight bearing", "DX ankle bilat 1 view", "DX ankle bilat 2 views", "DX ankle bilat 3+ views", "DX ankle bilat coalition series 4 views", "DX ankle bilat standing 3+ views", "DX ankle cone beam CT bilat", "DX ankle cone beam CT left", "DX ankle cone beam CT right", "DX ankle left 1 view", "DX ankle left 2 views", "DX ankle left 3+ views", "DX ankle left coalition series 4 views", "DX ankle right 1 view", "DX ankle right 2 views", "DX ankle right 3+ views", "DX ankle right coalition series 4 views", "DX ankle stress left 1 view", "DX ankle stress bilateral 1 view", "DX ankle stress right 1 view", "DX ankle stress left 2 views", "DX ankle stress right 2 views", "DX bone survey metabolic", "DX bone survey metastatic limited", "DX bone survey metastatic w/long bones", "DX calcaneus bilat 1 view", "DX calcaneus bilat 2 views", "DX calcaneus left 1 view", "DX calcaneus left 2 views", "DX calcaneus right 1 view", "DX calcaneus right 2 views", "DX cervical spine 1 view", "DX cervical spine 2-3 views", "DX cervical spine 4-5 views", "DX cervical spine 6+ views", "DX chest 1 view", "DX chest 4+ views", "DX Chest AP or PA and lat 2 views", "DX Chest AP or PA and lat w/apical lordotic 3 views", "DX Chest AP or PA and lat w/obliques 4 views", "DX Chest B read 1 view", "DX Chest B read 2 view", "DX chest decub bilat 2 view", "DX chest decub left 1 view", "DX chest decub right 1 view", "DX chest inspiration expiration", "DX chest inspiration expiration w/lat 3 views", "DX Chest PA lat w/decub 4 views", "DX chest portable 1 view", "DX chest portable post PICC placement 1 view", "DX Chest portable w/AM rounds 1 view", "DX chest post PICC placement 1 view", "DX clavicle bilateral 2 views", "DX clavicle left 1 view", "DX clavicle right 1 view", "DX clavicle left 2 views", "DX clavicle right 2 views", "DX clavicle serendipity 1 view", "DX elbow bilat 1 view", "DX elbow bilat 2 views", "DX elbow bilat 3+ views", "DX Elbow bilat AP and gunslinger lat 2 views", "DX Elbow bilat cubital AP 2 views", "DX elbow bilat total series 4 views", "DX elbow cone beam CT bilat", "DX elbow cone beam CT left", "DX elbow cone beam CT right", "DX elbow left 1 view", "DX elbow left 2 views", "DX elbow left 3+ views", "DX elbow left AP and gunslinger lat 2 views", "DX elbow left cubital AP 2 views", "DX elbow left total series 4 views", "DX elbow right 1 view", "DX elbow right 2 views", "DX elbow right 3+ views", "DX elbow right AP and gunslinger lat 2 views", "DX elbow right cubital AP 2 views", "DX elbow right total series 4 views", "DX elbow stress views left", "DX elbow stress views right", "DX entire spine scoliosis 1 view", "DX entire spine scoliosis 2-3 views", "DX entire spine scoliosis 4+ views", "DX entire spine scoliosis 6+ views", "DX facial bones 1-2 views", "DX facial bones 3+ views", "DX femur bilat 1 view", "DX femur bilat 2 views", "DX femur bilat 2+ views", "DX femur bilat center distal no weight bearing AP and lat 2 views", "DX femur bilat center proximal no weight bearing AP and lat 2 views", "DX femur bilat full length w/mag marker AP 1 view", "DX femur bilat full length w/mag marker AP & lat 2 views", "DX femur left 1 view", "DX femur left 2 views", "DX femur left 2+ views", "DX femur left center distal no weight bearing AP and lat 2 views", "DX femur left center prox no weight bearing AP and lat 2 views", "DX femur left full length w/mag marker AP 1 view", "DX femur left full length w/mag marker AP & lat 2 views", "DX femur right 1 view", "DX femur right 2 views", "DX femur right 2+ views", "DX femur right center distal no weight bearing AP and lat 2 views", "DX femur right center proximal no weight bearing AP and lat 2 views", "DX femur right full length w/mag marker AP 1 view", "DX femur right full length w/mag marker AP & lat 2 views", "DX finger bilat stress views", "DX finger left stress views", "DX finger right stress views", "DX fingers bilat 1 view", "DX fingers bilat 2+ views", "DX fingers left 1 view", "DX fingers left 2+ views", "DX fingers right 1 view", "DX fingers right 2+ views", "FL OARM", "FL fluoro less than 1 hour", "DX surgical specimen", "DX foot AP bilat 1 view", "DX foot bilat 1 view", "DX foot bilat 2 views", "DX foot bilat 3+ views", "DX foot cone beam CT bilat", "DX foot cone beam CT left", "DX foot cone beam CT right", "DX foot left 1 view", "DX foot left 2 views", "DX foot left 3+ views", "DX foot right 1 view", "DX foot right 2 views", "DX foot right 3+ views", "DX foot sesamoid bilat 2 views", "DX foot sesamoid left 2 views", "DX foot sesamoid right 2 views", "DX foot bilat 3 view calcaneus bilat 2 views", "DX foot left 3 view calcaneus left 2 views", "DX foot right 3 view calcaneus right 2 views", "DX foot ankle bilat 3+ views", "DX foot ankle left 3+ views", "DX foot ankle right 3+ views", "DX radius ulna bilat 2 views", "DX radius ulna bilat 4 views", "DX radius ulna left 1 view", "DX radius ulna left 2 views", "DX radius ulna left 4 views", "DX radius ulna right 1 view", "DX radius ulna right 2 views", "DX radius ulna right 4 views", "DX hand bilat 1 view", "DX hand bilat 2 views", "DX hand bilat 3+ views", "DX hand brewerton bilat 2 views", "DX hand brewerton left 2 views", "DX hand brewerton right 2 views", "DX hand cone beam CT bilat", "DX hand cone beam CT left", "DX hand cone beam CT right", "DX hand left 1 view", "DX hand left 2 views", "DX hand left 3+ views", "DX hand right 1 view", "DX hand right 2 views", "DX hand right 3+ views", "DX hand bilateral 2 views and wrist bilateral 2 views", "DX hand bilateral 3+ views and wrist bilateral 3+ views", "DX hand left 2 views and wrist left 2 views", "DX hand left 3+ views and wrist left 3+ views", "DX hand right 2 views and wrist right 2 views", "DX hand right 3+ views and wrist right 3+ views", "DX hip bilat 1 view", "DX hip bilat adduct and abduct 2 views", "DX hip bilat w/mag marker AP proximal 1 view", "DX hip left 1 view", "DX hip left 2-3 views", "DX hip left adduct and abduct 2 views", "DX hip left w/mag marker AP proximal 1 view", "DX hip right 1 view", "DX hip right 2-3 views", "DX hip right adduct and abduct 2 views", "DX hip right w/mag marker AP proximal 1 view", "DX hip and pelvis bilat 1 view", "DX hip and pelvis bilat 3-4 views", "DX hip and pelvis bilat 5+ views", "DX hip and pelvis left 2-3 views", "DX hip and pelvis left 4+ views", "DX hip and pelvis right 2-3 views", "DX hip and pelvis right 4+ views", "DX hip to ankle", "DX humerus bilat 2 views", "DX humerus left 1 view", "DX humerus left 2 views", "DX humerus right 1 view", "DX humerus right 2 views", "DX humerus left 2 view and elbow left 2 view", "DX humerus right 2 view and elbow right 2 view", "DX bone age", "DX pediatric shunt series 3 views", "DX pediatric bone survey", "DX pediatric nose to rectum foreign body", "DX cervical spine Ingrowth series 6 views", "DX knee bilat Ingrowth series 8 views", "DX knee left Ingrowth series 8 views", "DX knee right Ingrowth series 8 views", "DX lumbar spine Ingrowth series 6 views", "DX shoulder bilat Ingrowth series 5 views", "DX shoulder left Ingrowth series 5 views", "DX shoulder right Ingrowth series 5 views", "DX knee bilat 1 view", "DX knee bilat 2 view", "DX knee bilat 3 views", "DX knee bilat 4+ views", "DX knee bilat notch 1 view", "DX knee bilat patella 1 view", "DX knee bilat standing 2 views", "DX knee bilat standing 3 views", "DX knee bilat w/flexion and patella 3 views", "DX knee bilat w/flexion and patella 4 views", "DX knee cone beam CT bilat", "DX knee cone beam CT left", "DX knee cone beam CT right", "DX knee left 1 view", "DX knee left 2 views", "DX knee left 3 views", "DX knee left 4+ views", "DX knee left notch 1 view", "DX knee left patella 1 view", "DX knee left standing 1-2 views", "DX knee left standing 3 views", "DX knee left w/flexion and patella 3 views", "DX knee left w/flexion and patella 4 views", "DX knee right 1 view", "DX knee right 2 view", "DX knee right 3 views", "DX knee right 4+ views", "DX knee right notch 1 view", "DX knee right patella 1 view", "DX knee right standing 1-2 views", "DX knee right standing 3 views", "DX knee right w/flexion and patella 3 views", "DX knee right w/flexion and patella 4 views", "DX knee stress views left", "DX knee stress views right", "DX knees bilat standing AP", "DX lumbar spine 1 view", "DX lumbar spine 2-3 views", "DX lumbar spine 4+ views", "DX lumbar spine 6+ views", "DX lumbar spine cone beam CT", "DX lumbar spine flexion extension 2 views", "DX mandible 1-3 views", "DX mandible 4+ views", "DX nasal bones 3+ views", "DX neck soft tissue", "DX orbits 3 view", "DX panorex teeth", "DX pelvis 1-2 views", "DX pelvis 3+ views", "DX pelvis AP w/ruler 1 view", "DX abdomen retained surgical item 1 view", "DX chest retained surgical item 1 view", "DX extremity retained surgical item 1 view", "DX skull retained surgical item 1 view", "DX spine retained surgical item 1 view", "DX ribs bilat 3+ views", "DX ribs left 2 views", "DX ribs right 2 views", "DX sacroiliac joints 1-2 views", "DX sacroiliac joints 3+ views", "DX sacrum coccyx 2+ views", "DX scanogram bilat lower extremity 1 view", "DX scanogram bilat upper extremity 1 view", "DX scapula bilat 2 views", "DX scapula bilat w/lat 3 views", "DX scapula left 2 views", "DX scapula left w/lat 3 views", "DX scapula right 2 views", "DX scapula right w/lat 3 views", "DX shoulder bilat 1 view", "DX shoulder bilat 2+ views", "DX shoulder left 1 view", "DX shoulder left 2+ views", "DX shoulder right 1 view", "DX shoulder right 2+ views", "DX paranasal sinuses 1-2 views", "DX paranasal sinuses 3+ views", "DX skull 1-3 views", "DX skull 4+ views", "DX adult VA shunt series", "DX adult VP shunt series", "DX shunt non MRI programmable 1 view", "DX shunt post MRI programmable 1 view", "DX shunt pre MRI programmable 1 view", "DX spine 1 view", "DX spine laminectomy 1 view", "DX thoracic spine 2 views", "DX thoracic spine 3 views", "DX thoracic spine 4+ views", "DX thoracolumbar spine AP supine w/traction 2 views", "DX thoracolumbar spine 2 views", "DX thoracolumbar spine hyperextension lateral 1 view", "DX thoracolumbar spine scoliosis AP 1 view", "DX thoracolumbar spine w/flexion extension 4 views", "DX thumb left", "DX thumb right", "DX thumb bilateral", "DX tib fib bilat 2 views", "DX tibia fibula bilat full-length Std lateral w/ mag marker 1 view", "DX tib fib bilat center distal no weight bearing 2 views", "DX tib fib bilat center proximal no weight bearing 2 views", "DX tib fib left center distal no weight bearing 2 views", "DX tib fib left center proximal no weight bearing 2 views", "DX tib fib right center distal no weight bearing 2 views", "DX tib fib right center prox no weight bearing 2 views", "DX tibia fibula left 1 view", "DX tibia fibula left 2 views", "DX tibia fibula right 1 view", "DX tibia fibula right 2 views", "DX toes bilat 3 views", "DX toes left 2 views", "DX toes left 3 views", "DX toes right 2 views", "DX toes right 3 views", "DX shoulder tomosynthesis bilateral", "DX shoulder tomosynthesis left", "DX shoulder tomosynthesis right", "DX wrist tomosynthesis bilateral", "DX wrist tomosynthesis left", "DX wrist tomosynthesis right", "DX pediatric excretory urogram", "DX Kidneys ureters bladder", "DX wrist bilat PA and lat w/compression grip 2 views", "DX wrist bilat 1 view", "DX wrist bilat 2 views", "DX wrist bilat 3+ views", "DX wrist bilat motion series 6 views", "DX wrist bilat motion series w/compression 8 views", "DX wrist bilat PA and lat w/tilt lat 3 views", "DX wrist cone beam CT bilat", "DX wrist cone beam CT left", "DX wrist cone beam CT right", "DX wrist left 1 view", "DX wrist left 2 views", "DX wrist left 3+ views", "DX wrist left motion series 6 views", "DX wrist left motion series w/compression 8 views", "DX wrist left PA and lat w/compression grip 2 views", "DX wrist left PA and lat w/tilt lat 3 views", "DX wrist right 1 view", "DX wrist right 2 views", "DX wrist right 3+ views", "DX wrist right motion series 6 views", "DX wrist right motion series w/compression 8 views", "DX wrist right PA and lat w/compression grip 2 views", "DX wrist right PA and lat w/tilt lat 3 views", "DX wrist stress views left", "DX wrist stress views right"];
+
+/* NORMALIZE-START
+   Standard exam names - same rules used to clean up the Excel log (2026-11-05):
+   typos/spacing/capitals, Bilat -> Bilateral, add "Views", Hip and Pelvis -> Hips and Pelvis,
+   Body part -> Side -> Number, Left before Right in combined orders,
+   Foot Ankle -> Foot and Ankle, Lumbar flexion/extension merged, Hand and Wrist combined exams. */
+const NZ_TYPOS = [
+  [/\bVIews\b/gi, 'Views'], [/\bRIght\b/gi, 'Right'], [/\bRght\b/gi, 'Right'],
+  [/\bBilteral\b/gi, 'Bilateral'], [/\bBlateral\b/gi, 'Bilateral'], [/\bBilaterai\b/gi, 'Bilateral'],
+  [/\bBilat\b/gi, 'Bilateral'], [/\bPelvls\b/gi, 'Pelvis'], [/\bStandin\b/gi, 'Standing'],
+  [/\bWrsit\b/gi, 'Wrist'], [/\bShould\b(?!er)/gi, 'Shoulder'],
+];
+const NZ_LOWER = new Set(['and', 'with', 'x2', 'or', 'to', 'of', 'in', 'the']);
+const NZ_UPPER = new Set(['DX', 'PA', 'KUB', 'AP', 'CT', 'AC', 'VA', 'VP', 'PICC', 'AM', 'OARM', 'EOS']);
+const NZ_COUNT = '\\d+(?:-\\d+)?\\+?';
+
+function nzTitle(word) {
+  if (word.includes('§')) return word.split('§').map(nzTitle).join('§');
+  const core = word.replace(/^,+|,+$/g, '');
+  if (NZ_LOWER.has(core.toLowerCase())) return word.toLowerCase();
+  if (NZ_UPPER.has(core.toUpperCase())) return word.toUpperCase();
+  if (/^[\d\-+]+$/.test(core)) return word;
+  return word.slice(0, 1).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+function nzSegment(p) {
+  p = p.trim();
+  if (!p) return p;
+  for (const [re, rep] of NZ_TYPOS) p = p.replace(re, rep);
+  p = p.split(' ').filter(Boolean).map(nzTitle).join(' ');
+  p = p.replace(/\bHip and Pelvis\b/g, 'Hips and Pelvis');
+  p = p.replace(/\bFoot Ankle\b/g, 'Foot and Ankle');
+  p = p.replace(/^Lumbar Views\b/, 'Lumbar Spine');
+  p = p.replace(/^Lumbar Spine (Flex§Ext|Flexion and Extension|Flexion Extension)( 2)?( Views?)?$/i,
+                'Lumbar Spine Flexion Extension 2 Views');
+  let m = p.match(new RegExp('^(Left|Right|Bilateral) ([A-Za-z][A-Za-z ]*?)( ' + NZ_COUNT + '.*)?$'));
+  if (m) p = `${m[2]} ${m[1]}${m[3] || ''}`;
+  m = p.match(new RegExp('^(.*? )(' + NZ_COUNT + ')(?: Views?)?( x2)?$'));
+  if (m) p = `${m[1]}${m[2]} ${m[2] === '1' ? 'View' : 'Views'}${m[3] || ''}`;
+  return p;
+}
+
+function nzSide(seg) {
+  for (const s of ['Left', 'Right', 'Bilateral']) if (new RegExp(`\\b${s}\\b`).test(seg)) return s;
+  return null;
+}
+
+function normalizeExam(name) {
+  if (name === null || name === undefined) return name;
+  let s = String(name).replace(/\s+/g, ' ').trim();
+  if (!s) return s;
+  s = s.replace(/\bW\//gi, 'W§').replace(/\bFlex\/Ext\b/gi, 'Flex§Ext').replace(/^Hand\/Wrist\b/i, 'Hand and Wrist');
+  const segs = s.split('/').filter(x => x.trim()).map(nzSegment);
+  // Left before Right; Bilateral / no-side exams stay where they were typed
+  const slots = segs.map((g, i) => ['Left', 'Right'].includes(nzSide(g)) ? i : -1).filter(i => i >= 0);
+  const lr = slots.map(i => segs[i]);
+  const ordered = lr.filter(g => nzSide(g) === 'Left').concat(lr.filter(g => nzSide(g) === 'Right'));
+  slots.forEach((i, k) => { segs[i] = ordered[k]; });
+  let out = segs.join('/').replace(/W§/g, 'W/').replace(/Flex§Ext/g, 'Flex/Ext');
+  out = out.replace(new RegExp('^Hand (Left|Right|Bilateral) (' + NZ_COUNT + ') Views and Wrist \\1 \\2 Views$'),
+                    'Hand and Wrist $1 $2 Views');
+  return out;
+}
+/* NORMALIZE-END */
+
+function formatExamName(raw) {
+  return normalizeExam(raw.replace(/^(DX|FL)\s+/i, ''));
+}
+
+function acCandidates(typed) {
+  const t = typed.trim().toLowerCase();
+  if (t.length < 3) return [];
+  const words = t.split(/\s+/).filter(Boolean);
+  const results = [];
+  for (const exam of EXAM_LIST) {
+    const tokens = exam.toLowerCase().split(/\s+/);
+    let idx = 0;
+    let ok = true;
+    for (const w of words) {
+      let found = -1;
+      for (let i = idx; i < tokens.length; i++) {
+        if (tokens[i].startsWith(w) || w.startsWith(tokens[i])) { found = i; break; }
+      }
+      if (found === -1) { ok = false; break; }
+      idx = found + 1;
+    }
+    if (ok) results.push(exam);
+  }
+  return results;
+}
+
 let entries = [];
 let current = {};
 let step = 0;
 let activeFields = [];
+let choiceHi = 0;   // keyboard-highlighted option on choice steps
 
-function openNumbersManager() {
-  const list = loadKnownNumbers();
-  document.getElementById('stepLabel').textContent = 'Known numbers';
-  document.getElementById('dots').innerHTML = '';
-  const body = document.getElementById('body');
-  const rows = list.map((n, i) => `
-    <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;">
-      <span style="flex:1;font-size:12px;">${n.phone} — ${n.label}</span>
-      <button class="del" style="color:var(--red);background:none;border:none;padding:2px 6px;font-size:11px;" onclick="removeKnownNumber(${i})">delete</button>
-    </div>`).join('');
-  body.innerHTML = `
-    <p class="question">Known numbers</p>
-    <div style="max-height:110px;overflow-y:auto;margin-bottom:8px;">${rows || '<p style="font-size:11px;color:var(--text-faint);">None saved yet.</p>'}</div>
-    <input type="text" id="new-phone" placeholder="Phone number" style="margin-bottom:5px;">
-    <select id="new-label" style="width:100%;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font-size:12px;">
-      <option>Appointment Office (Proxy)</option>
-      <option>Scheduling Staff</option>
-      <option>Other</option>
-    </select>
-  `;
-  document.getElementById('nav').innerHTML = `
-    <button class="btn-back" onclick="render()">Close</button>
-    <button class="btn-next" onclick="addKnownNumber()">Add number</button>
-  `;
+function ensureCounterBaseline() {
+  // One-time correction: force the counter to a known-good value so this
+  // update doesn't inherit whatever bad number was stuck in localStorage.
+  // Runs once ever (per browser), tracked by the flag below.
+  const FLAG = 'discrepancy-id-counter-baseline-2026-09-22';
+  if (!localStorage.getItem(FLAG)) {
+    localStorage.setItem('discrepancy-id-counter', '333'); // next call returns DE-000334
+    localStorage.setItem(FLAG, '1');
+  }
 }
 
-function addKnownNumber() {
-  const phone = document.getElementById('new-phone').value.trim();
-  const label = document.getElementById('new-label').value;
-  if (!phone) { alert('Enter a phone number.'); return; }
-  const list = loadKnownNumbers();
-  list.push({ phone, label });
-  saveKnownNumbers(list);
-  openNumbersManager();
+function nextEntryID() {
+  let counter = parseInt(localStorage.getItem('discrepancy-id-counter') || '333', 10);
+  counter += 1;
+  localStorage.setItem('discrepancy-id-counter', String(counter));
+  // e.g. DE-000042 - sequential, human-readable, guaranteed unique per device
+  return 'DE-' + String(counter).padStart(6, '0');
 }
 
-function removeKnownNumber(idx) {
-  const list = loadKnownNumbers();
-  list.splice(idx, 1);
-  saveKnownNumbers(list);
-  openNumbersManager();
+function peekNextID() {
+  const counter = parseInt(localStorage.getItem('discrepancy-id-counter') || '333', 10);
+  return 'DE-' + String(counter + 1).padStart(6, '0');
 }
 
-function loadKnownNumbers() {
-  try { return JSON.parse(localStorage.getItem('known-numbers') || '[]'); } catch(e) { return []; }
-}
-function saveKnownNumbers(list) {
-  localStorage.setItem('known-numbers', JSON.stringify(list));
-}
-function lookupKnownNumber(phone) {
-  if (!phone) return null;
-  const list = loadKnownNumbers();
-  const match = list.find(n => n.phone.replace(/\D/g,'') === phone.replace(/\D/g,'') && phone.replace(/\D/g,''));
-  return match ? match.label : null;
+function setNextID() {
+  const current = peekNextID();
+  const input = prompt(`Next entry will be numbered ${current}.\nEnter the number you want the NEXT entry to be (digits only, e.g. 334):`, parseInt(current.slice(3), 10));
+  if (input === null) return; // cancelled
+  const n = parseInt(input, 10);
+  if (isNaN(n) || n < 1) {
+    alert('Enter a whole number, e.g. 334.');
+    return;
+  }
+  localStorage.setItem('discrepancy-id-counter', String(n - 1));
+  updateCount();
+  alert(`Next entry will now be DE-${String(n).padStart(6,'0')}.`);
 }
 
 function loadData() {
   try { entries = JSON.parse(localStorage.getItem('discrepancy-entries') || '[]'); } catch(e) { entries = []; }
+  // Backfill IDs for any entries saved before ID tracking existed
+  let migrated = false;
+  entries.forEach(e => {
+    if (!e.entryID) {
+      e.entryID = nextEntryID();
+      migrated = true;
+    }
+  });
+  if (migrated) saveData();
   updateCount();
 }
 function saveData() {
@@ -189,7 +317,7 @@ function saveData() {
   updateCount();
 }
 function updateCount() {
-  document.getElementById('count').textContent = entries.length + ' logged';
+  document.getElementById('count').textContent = entries.length + ' logged · Next: ' + peekNextID();
 }
 
 function resolveFields() {
@@ -206,7 +334,7 @@ function resolveFields() {
 
   if (current.errorType === 'Scheduling Error' && current.schedReason === 'Other') {
     const idx = base.findIndex(f => f.key === 'schedReason');
-    base.splice(idx+1, 0, { key: 'schedReasonDetail', label: 'Scheduling issue detail', type: 'text' });
+    base.splice(idx+1, 0, { key: 'schedReasonDetail', label: 'Scheduling reason detail', type: 'text' });
   }
 
   base.push({ key: 'time', label: 'Resolution time (min)', type: 'number', optional: true });
@@ -215,11 +343,14 @@ function resolveFields() {
 }
 
 function start() {
-  current = {};
+  current = { date: new Date().toISOString().slice(0,10) };
   step = 0;
   activeFields = resolveFields();
   render();
 }
+
+const escAttr = s => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+const isExamField = key => key === 'order' || key === 'corrected';
 
 function render() {
   activeFields = resolveFields();
@@ -232,27 +363,169 @@ function render() {
   let html = `<p class="question">${f.label}${f.optional ? ' <span style="color:var(--text-faint);font-weight:400;">(optional)</span>' : ''}</p>`;
 
   if (f.type === 'choice') {
+    const selIdx = f.options.indexOf(current[f.key]);
+    choiceHi = selIdx >= 0 ? selIdx : 0;
     html += '<div class="options">';
-    f.options.forEach(o => {
+    f.options.forEach((o, i) => {
       const sel = current[f.key] === o ? ' selected' : '';
-      html += `<button class="opt${sel}" onclick="choose('${f.key}', '${o.replace(/'/g,"\\'")}')">${o}</button>`;
+      const kb = i === choiceHi ? ' kb' : '';
+      const key = i < 9 ? String(i + 1) : (i === 9 ? '0' : '↓');
+      html += `<button class="opt${sel}${kb}" data-i="${i}" tabindex="-1" onclick="choose('${f.key}', '${o.replace(/'/g,"\\'")}')"><span class="key">${key}</span>${o}</button>`;
     });
     html += '</div>';
-  } else if (f.type === 'date') {
-    const val = current[f.key] || f.default();
-    html += `<input type="date" id="inp" value="${val}" oninput="typeVal('${f.key}', this.value)">`;
-    if (!current[f.key]) current[f.key] = val;
   } else if (f.type === 'number') {
-    html += `<input type="number" id="inp" value="${current[f.key]||''}" oninput="typeVal('${f.key}', this.value)">`;
+    html += `<input type="number" id="inp" value="${escAttr(current[f.key])}" oninput="typeVal('${f.key}', this.value)">`;
+  } else if (isExamField(f.key)) {
+    html += `<div class="ac-wrap">
+      <input type="text" id="inp" value="${escAttr(current[f.key])}" placeholder="Type a few letters of each word" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <div id="acList" class="ac-list" style="display:none;"></div>
+    </div>
+    <div class="hint" id="acTag">↑↓ pick · Enter/Tab accept · "/" for a 2nd exam · Enter again = Next</div>`;
+  } else if (f.key === 'notes') {
+    html += `<input type="text" id="inp" value="${escAttr(current[f.key])}" placeholder="Type here" autocomplete="off" spellcheck="true">
+    <div class="hint">Shorthand: ${Object.keys(NOTE_SHORTHAND).join(' · ')}</div>`;
   } else {
-    html += `<input type="text" id="inp" value="${current[f.key]||''}" oninput="typeVal('${f.key}', this.value)" placeholder="Type here">`;
+    html += `<input type="text" id="inp" value="${escAttr(current[f.key])}" oninput="typeVal('${f.key}', this.value)" placeholder="Type here">`;
   }
   body.innerHTML = html;
   const inp = document.getElementById('inp');
-  if (inp) { inp.focus(); inp.addEventListener('keydown', e => { if (e.key === 'Enter') next(); }); }
+  if (inp) {
+    inp.focus();
+    inp.setSelectionRange && inp.type === 'text' && inp.setSelectionRange(inp.value.length, inp.value.length);
+    if (isExamField(f.key)) {
+      inp.addEventListener('input', () => handleExamInput(f.key, inp));
+      inp.addEventListener('keydown', e => examKeydown(e, f.key, inp));
+    } else if (f.key === 'notes') {
+      inp.addEventListener('input', e => notesInput(e, inp));
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          expandTrailingCode(inp);
+          current.notes = inp.value;
+          if (e.key === 'Enter') { e.preventDefault(); next(); }
+        }
+      });
+    } else {
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); next(); } });
+    }
+  }
 
   renderNav(f);
 }
+
+/* ---------- Exam type-ahead (works on the exam after the last "/") ---------- */
+let acHiIndex = -1;
+let acShown = [];
+
+function examSegment(value) {
+  const i = value.lastIndexOf('/');
+  return { head: i >= 0 ? value.slice(0, i + 1) : '', seg: i >= 0 ? value.slice(i + 1) : value };
+}
+
+function handleExamInput(key, inp) {
+  current[key] = inp.value;
+  inp.classList.remove('matched');
+  const list = document.getElementById('acList');
+  const { seg } = examSegment(inp.value);
+  const all = acCandidates(seg);
+  acShown = all.slice(0, 8);
+  acHiIndex = acShown.length ? 0 : -1;
+  if (!acShown.length) { list.style.display = 'none'; list.innerHTML = ''; return; }
+  list.innerHTML = acShown.map((c, i) =>
+    `<div class="ac-item${i === 0 ? ' hi' : ''}" onmousedown="event.preventDefault(); pickExam('${key}', ${i})">${formatExamName(c)}</div>`
+  ).join('') + (all.length > 8 ? `<div class="ac-more">+${all.length - 8} more - keep typing to narrow</div>` : '');
+  list.style.display = 'block';
+}
+
+function moveAcHighlight(delta) {
+  if (!acShown.length) return;
+  acHiIndex = (acHiIndex + delta + acShown.length) % acShown.length;
+  document.querySelectorAll('#acList .ac-item').forEach((el, i) => {
+    el.classList.toggle('hi', i === acHiIndex);
+    if (i === acHiIndex) el.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function closeAc() {
+  const list = document.getElementById('acList');
+  if (list) { list.style.display = 'none'; list.innerHTML = ''; }
+  acShown = []; acHiIndex = -1;
+}
+
+function pickExam(key, idx) {
+  const raw = acShown[idx];
+  if (raw === undefined) return;
+  const inp = document.getElementById('inp');
+  const { head } = examSegment(inp.value);
+  inp.value = head + formatExamName(raw);
+  current[key] = inp.value;
+  inp.classList.add('matched');
+  closeAc();
+  inp.focus();
+}
+
+function examKeydown(e, key, inp) {
+  const open = acShown.length > 0;
+  if (e.key === 'ArrowDown' && open) { e.preventDefault(); moveAcHighlight(1); }
+  else if (e.key === 'ArrowUp' && open) { e.preventDefault(); moveAcHighlight(-1); }
+  else if ((e.key === 'Enter' || e.key === 'Tab') && open) { e.preventDefault(); pickExam(key, acHiIndex); }
+  else if (e.key === 'Enter') { e.preventDefault(); next(); }
+  else if (e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); closeAc(); }
+}
+
+/* ---------- Notes shorthand ---------- */
+function expandTrailingCode(inp, keepChars = 0) {
+  // keepChars = how many just-typed separator characters sit after the code
+  const caret = inp.selectionStart ?? inp.value.length;
+  const before = inp.value.slice(0, caret - keepChars);
+  const m = before.match(/(^|[\s(\-])([A-Za-z0-9]+)$/);
+  if (!m) return false;
+  const code = m[2].toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(NOTE_SHORTHAND, code)) return false;
+  const start = before.length - m[2].length;
+  const expansion = NOTE_SHORTHAND[code];
+  inp.value = inp.value.slice(0, start) + expansion + inp.value.slice(caret - keepChars);
+  const pos = start + expansion.length + keepChars;
+  inp.setSelectionRange(pos, pos);
+  return true;
+}
+
+function notesInput(e, inp) {
+  if (e.inputType === 'insertText' && e.data && /^[\s.,;:!?)]$/.test(e.data)) expandTrailingCode(inp, 1);
+  current.notes = inp.value;
+}
+
+/* ---------- Choice steps by keyboard ---------- */
+function choiceKeydown(e) {
+  const f = activeFields[step];
+  if (!f || f.type !== 'choice') return false;
+  const n = f.options.length;
+  if (/^[0-9]$/.test(e.key)) {
+    const idx = e.key === '0' ? 9 : parseInt(e.key, 10) - 1;
+    if (idx < n) { e.preventDefault(); choose(f.key, f.options[idx]); }
+    return true;
+  }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    choiceHi = (choiceHi + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    document.querySelectorAll('.opt').forEach((el, i) => el.classList.toggle('kb', i === choiceHi));
+    return true;
+  }
+  if (e.key === 'Enter') { e.preventDefault(); choose(f.key, f.options[choiceHi]); return true; }
+  return false;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  // Text boxes handle their own keys; only Esc (= Back) falls through from them
+  if (e.target.tagName === 'INPUT' && e.key !== 'Escape') return;
+  if (step >= activeFields.length) {                       // Done screen
+    if (e.key === 'Enter') { e.preventDefault(); save(); }
+    else if (e.key === 'Escape') { e.preventDefault(); step = activeFields.length - 1; render(); }
+    return;
+  }
+  if (choiceKeydown(e)) return;
+  if (e.key === 'Escape' && step > 0) { e.preventDefault(); back(); }
+});
 
 function renderDots() {
   const dots = document.getElementById('dots');
@@ -274,42 +547,56 @@ function renderNav(f) {
   const canSkip = f.optional;
   const isChoice = f.type === 'choice';
   nav.innerHTML = `
-    ${canBack ? '<button class="btn-back" onclick="back()">Back</button>' : ''}
-    ${canSkip ? '<button class="btn-skip" onclick="skip()">Skip</button>' : ''}
-    ${isChoice ? '' : '<button class="btn-next" onclick="next()">Next</button>'}
+    ${canBack ? '<button class="btn-back" tabindex="-1" onclick="back()">Back</button>' : ''}
+    ${canSkip ? '<button class="btn-skip" tabindex="-1" onclick="skip()">Skip</button>' : ''}
+    ${isChoice ? '' : '<button class="btn-next" tabindex="-1" onclick="next()">Next</button>'}
   `;
 }
 
 function next() {
   const f = activeFields[step];
+  const inp = document.getElementById('inp');
+  if (inp && f.type !== 'choice') {
+    if (f.key === 'notes') expandTrailingCode(inp);
+    current[f.key] = inp.value;
+  }
+  // Auto-clean exam names to the standard format ("Same" stays "Same")
+  if (isExamField(f.key) && current[f.key] && current[f.key].trim().toLowerCase() !== 'same') {
+    current[f.key] = normalizeExam(current[f.key]);
+  } else if (isExamField(f.key) && current[f.key]) {
+    current[f.key] = 'Same';
+  }
   if (!f.optional && f.type !== 'choice' && !current[f.key] && f.key !== 'date') {
     alert('Enter a value or use Skip if optional.');
     return;
   }
+  closeAc();
   step++;
   render();
 }
-function back() { step--; render(); }
-function skip() { step++; render(); }
+function back() { closeAc(); step--; render(); }
+function skip() { closeAc(); step++; render(); }
 
 function renderDone() {
   document.getElementById('stepLabel').textContent = 'Complete';
   document.getElementById('dots').innerHTML = '';
   const body = document.getElementById('body');
+  const h = s => escAttr(s || '—');
   const summary = current.errorType === 'Order Error'
-    ? `<b>${current.order || '—'}</b> → <b>${current.corrected || '—'}</b><br>${current.site || ''}`
-    : `<b>Scheduling Error</b> — ${current.schedReason || ''}<br>${current.site || ''}`;
+    ? `<b>${h(current.order)}</b> → <b>${h(current.corrected)}</b><br>${h(current.site)}`
+    : `<b>${h(current.origLocation)}</b> → <b>${h(current.corrLocation)}</b><br>${h(current.schedReason || 'Scheduling Error')} · ${h(current.site)}`;
   body.innerHTML = `
     <div class="done-screen">
       <div class="check">✓</div>
       <p>${summary}</p>
-      <button class="btn-next" style="width:100%;" onclick="save()">Save entry</button>
+      <button class="btn-next" style="width:100%;" onclick="save()">Save entry (Enter)</button>
     </div>`;
-  document.getElementById('nav').innerHTML = `<button class="btn-back" onclick="step=activeFields.length-1;render()">Edit</button>`;
+  document.getElementById('nav').innerHTML = `<button class="btn-back" onclick="step=activeFields.length-1;render()">Edit (Esc)</button>`;
 }
 
 function save() {
   const finalEntry = { ...current };
+  finalEntry.entryID = nextEntryID();
   if (finalEntry.errorType === 'Order Error') {
     finalEntry.cause = 'Provider Order Error';
     if (finalEntry.categoryDetail) {
@@ -318,16 +605,10 @@ function save() {
   } else if (finalEntry.errorType === 'Scheduling Error') {
     finalEntry.cause = 'Scheduling Error';
     finalEntry.category = 'Exam scheduled incorrectly';
-    finalEntry.order = finalEntry.order || '';
-    finalEntry.corrected = finalEntry.corrected || '';
-  }
-  // Order Entered By: auto-computed from phone lookup, same logic as the Excel formula.
-  // Blank phone -> blank. Phone entered but no match -> assumes Ordering Provider. Match -> that label.
-  if (finalEntry.orderPhone) {
-    const match = lookupKnownNumber(finalEntry.orderPhone);
-    finalEntry.enteredBy = match || 'Ordering Provider';
-  } else {
-    finalEntry.enteredBy = '';
+    finalEntry.order = finalEntry.origLocation || '';
+    finalEntry.corrected = finalEntry.corrLocation || '';
+    delete finalEntry.origLocation;
+    delete finalEntry.corrLocation;
   }
   delete finalEntry.errorType;
   delete finalEntry.categoryDetail;
@@ -344,10 +625,13 @@ function clearAll() {
 }
 
 function exportCSV() {
-  const headers = ['Date','Site','OrderPlaced','CorrectedTo','Department','Category','ChargeImpact','RootCause','RootCauseDetail','ResolutionTimeMin','Notes','SchedulingIssue','SchedulingIssueDetail','OrderEnteredBy','OrderingPhoneNumber'];
-  const rows = entries.map(e => [e.date,e.site,e.order,e.corrected,e.dept,e.category,e.charge,e.cause,e.causeDetail,e.time,e.notes,e.schedReason,e.schedReasonDetail,e.enteredBy,e.orderPhone]
-    .map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
-  const csv = '\uFEFF' + headers.join(',') + '\r\n' + rows.join('\r\n');
+  const headers = ['EntryID','Date','Site','OrderPlaced','CorrectedTo','Department','Category','ChargeImpact','RootCause','RootCauseDetail','ResolutionTimeMin','Notes','OrderingPhoneNumber','SchedulingIssue','SchedulingIssueDetail'];
+  const rows = entries.map(e => [
+    e.entryID, e.date, e.site, e.order, e.corrected, e.dept,
+    e.category, e.charge, e.cause, e.causeDetail, e.time, e.notes,
+    e.phone || e.orderPhone || '', e.schedReason || '', e.schedReasonDetail || ''
+  ].map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
+  const csv = '﻿' + headers.join(',') + '\n' + rows.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -356,6 +640,7 @@ function exportCSV() {
   URL.revokeObjectURL(url);
 }
 
+ensureCounterBaseline();
 loadData();
 start();
 </script>
