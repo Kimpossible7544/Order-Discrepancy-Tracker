@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radiology Order Discrepancy Patterns</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root {
+    --bg: #0b0f17; --panel: #121826; --panel-2: #161f30; --border: #232d40; --border-hi: #33415a;
+    --text: #e8ecf3; --text-dim: #8b96ac; --text-faint: #5b6478;
+    --teal: #2dd4bf; --teal-dim: #0f766e; --amber: #f5a623; --red: #f0574a; --blue: #4a90d9;
+    --mono: 'JetBrains Mono', monospace; --sans: 'Inter', -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 28px 48px;
+    background: radial-gradient(ellipse at top, #0d1220 0%, var(--bg) 55%);
+    color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; color: var(--teal);
+    text-transform: uppercase; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  .eyebrow::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 8px var(--teal); }
+  h1 { font-size: 26px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--text-dim); font-size: 14px; margin: 0 0 6px; line-height: 1.5; }
+  .meta { color: var(--text-faint); font-size: 12px; font-family: var(--mono); margin: 0 0 26px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 10px; }
+  .stat { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border);
+    border-left: 3px solid var(--teal-dim); border-radius: 10px; padding: 16px 18px; }
+  .stat.warn { border-left-color: var(--amber); }
+  .stat .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .stat .value { font-family: var(--mono); font-size: 26px; font-weight: 600; }
+  .stat .value small { font-size: 14px; color: var(--text-faint); font-weight: 500; }
+  .note { font-size: 11.5px; color: var(--text-dim); margin: 0 0 24px; line-height: 1.5; }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; margin-bottom: 20px; }
+  .panel h2 { font-size: 13px; font-weight: 600; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.06em;
+    display: flex; align-items: center; gap: 8px; }
+  .panel h2::before { content: ''; width: 3px; height: 14px; background: var(--teal); border-radius: 2px; }
+  .hint { font-size: 12px; color: var(--text-faint); margin: 0 0 16px; line-height: 1.5; }
+  .findings { margin: 0; padding-left: 20px; color: var(--text); font-size: 14px; line-height: 1.7; }
+  .findings b { color: var(--teal); font-family: var(--mono); font-weight: 600; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .chart-box { position: relative; height: 240px; }
+  .link-btn { background: none; border: none; color: var(--text-dim); padding: 4px 0; margin-top: 8px; font-size: 12px;
+    font-family: var(--sans); text-decoration: underline; cursor: pointer; }
+  .link-btn:hover { color: var(--teal); }
+  .empty { color: var(--text-dim); font-size: 14px; padding: 40px 20px; text-align: center; line-height: 1.6; }
+  footer { color: var(--text-faint); font-size: 12px; line-height: 1.6; margin-top: 28px; border-top: 1px solid var(--border); padding-top: 16px; }
+  @media (max-width: 720px) {
+    .charts { grid-template-columns: 1fr; }
+    body { padding: 20px 16px 40px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="eyebrow">Radiology IT · Order quality analysis</p>
+<h1>Radiology order discrepancy patterns</h1>
+<p class="sub">Order and protocol discrepancies caught during pre-appointment order review across 11 radiology sites, tracked to find where errors start and stop them upstream.</p>
+<p class="meta" id="meta">Loading…</p>
+
+<div id="content">
+  <div class="stats" id="stats"></div>
+  <p class="note">* Charge impact is based on whether the corrected exam was a significant change from the original order. It may or may not reflect final billing. Dates are when the discrepancy was found, not the exam date.</p>
+
+  <div class="panel">
+    <h2>Key findings</h2>
+    <ul class="findings" id="findings"></ul>
+  </div>
+
+  <div class="panel">
+    <h2>Top order patterns</h2>
+    <p class="hint">Exam as ordered → what it was corrected to. "Same" means the exam name was right but the selected views didn't match it.</p>
+    <div class="chart-box" id="pairs-box"><canvas id="chartPairs" role="img" aria-label="Most frequent order-as-placed to corrected-to patterns"></canvas></div>
+    <div id="pairs-more"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Where errors start</h2>
+    <p class="hint">Who entered the order, and which ordering departments generate the most corrections. Department names are masked.</p>
+    <div class="charts">
+      <div class="chart-box"><canvas id="chartEntered" role="img" aria-label="Discrepancies by who entered the order"></canvas></div>
+      <div class="chart-box"><canvas id="chartCause" role="img" aria-label="Discrepancies by root cause"></canvas></div>
+    </div>
+    <div class="chart-box" id="dept-box" style="margin-top:20px;"><canvas id="chartDept" role="img" aria-label="Discrepancies by masked ordering department"></canvas></div>
+    <div id="dept-more"></div>
+  </div>
+
+  <div class="panel">
+    <h2>What kind of errors</h2>
+    <div class="charts">
+      <div class="chart-box"><canvas id="chartCategory" role="img" aria-label="Discrepancies by category"></canvas></div>
+      <div class="chart-box"><canvas id="chartCharge" role="img" aria-label="Discrepancies by charge impact"></canvas></div>
+      <div class="chart-box"><canvas id="chartSite" role="img" aria-label="Discrepancies by site"></canvas></div>
+      <div class="chart-box"><canvas id="chartResTime" role="img" aria-label="Average resolution time by category"></canvas></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Over time</h2>
+    <div class="charts">
+      <div class="chart-box"><canvas id="chartTrend" role="img" aria-label="Discrepancies found per week"></canvas></div>
+      <div class="chart-box"><canvas id="chartDow" role="img" aria-label="Discrepancies found by day of week"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Real counts from a live discrepancy log. Department names are masked. No patient information, individual entries, notes, or phone numbers are published.
+</footer>
+
+</div>
+<script>
+/* Where the scrubbed summary comes from: a CSV export of the workbook's "Public" tab
+   (columns Section, Label, Count, ChargeImpacting). Put a public_summary.csv next to
+   this page, or replace this with a direct-download link to that CSV. */
+const SUMMARY_URL = 'public_summary.csv';
+
+const C = { tick: '#8b96ac', grid: '#232d40', text: '#e8ecf3', teal: '#2dd4bf', amber: '#f5a623',
+            red: '#f0574a', blue: '#4a90d9', slate: '#3a4256', faint: '#5b6478' };
+Chart.defaults.font.family = 'Inter';
+Chart.defaults.color = C.tick;
+
+function parseCSV(text) {
+  const rows = []; let row = [], cur = '', q = false;
+  text = text.replace(/^﻿/, '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { cur += '"'; i++; }
+      else if (c === '"') q = false;
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); rows.push(row); row = []; cur = '';
+    } else cur += c;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+
+function toSections(rows) {
+  const out = {};
+  rows.slice(1).forEach(r => {
+    const [section, label, count, charge] = r.map(v => (v ?? '').trim());
+    if (!section || !label || count === '') return;
+    (out[section] = out[section] || []).push({
+      label, count: isNaN(+count) ? count : +count,
+      charge: charge === '' || isNaN(+charge) ? null : +charge
+    });
+  });
+  return out;
+}
+
+const pct = (n, d) => d ? Math.round(n / d * 100) : 0;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const pairLabel = s => s.replace(/\s*->\s*/, ' → ');
+
+function stackedBar(id, items, opts = {}) {
+  return new Chart(document.getElementById(id), {
+    type: 'bar',
+    data: {
+      labels: items.map(i => opts.labelFn ? opts.labelFn(i.label) : i.label),
+      datasets: [
+        { label: 'Charge-impacting*', data: items.map(i => i.charge ?? 0), backgroundColor: C.red, borderRadius: 4, stack: 's' },
+        { label: 'Other', data: items.map(i => i.count - (i.charge ?? 0)), backgroundColor: opts.color || C.teal, borderRadius: 4, stack: 's' },
+      ]
+    },
+    options: {
+      indexAxis: opts.horizontal ? 'y' : 'x', responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+        title: opts.title ? { display: true, text: opts.title, color: C.text, font: { size: 12 } } : { display: false },
+        tooltip: { callbacks: { footer: its => `Total: ${items[its[0].dataIndex].count}` } }
+      },
+      scales: {
+        x: { stacked: true, ticks: { font: { size: 10 }, precision: 0 }, grid: { color: C.grid } },
+        y: { stacked: true, ticks: { color: opts.horizontal ? C.text : C.tick, font: { size: opts.horizontal ? 11 : 10 }, precision: 0 }, grid: { display: !opts.horizontal, color: C.grid } }
+      }
+    }
+  });
+}
+
+function simpleBar(id, labels, data, title, color, opts = {}) {
+  return new Chart(document.getElementById(id), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: opts.unit || 'Count', data, backgroundColor: color, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, title: { display: true, text: title, color: C.text, font: { size: 12 } } },
+      scales: { x: { ticks: { font: { size: 10 } }, grid: { color: C.grid } },
+                y: { ticks: { precision: opts.decimals ? undefined : 0 }, grid: { color: C.grid } } }
+    }
+  });
+}
+
+/* Top-10 lists with a Show all link */
+const expanded = {};
+const charts = {};
+function topList(key, items, boxId, moreId, canvasId, opts) {
+  if (charts[key]) charts[key].destroy();
+  const shown = expanded[key] ? items : items.slice(0, 10);
+  document.getElementById(boxId).style.height = Math.max(160, shown.length * 28 + 70) + 'px';
+  charts[key] = stackedBar(canvasId, shown, opts);
+  const more = document.getElementById(moreId);
+  more.innerHTML = items.length > 10
+    ? `<button class="link-btn">${expanded[key] ? 'Show top 10 only ▴' : `Show all ${items.length} ▾`}</button>` : '';
+  const btn = more.querySelector('button');
+  if (btn) btn.onclick = () => { expanded[key] = !expanded[key]; topList(key, items, boxId, moreId, canvasId, opts); };
+}
+
+function render(S) {
+  const sum = Object.fromEntries((S['Summary'] || []).map(r => [r.label, r]));
+  const total = sum['Total entries']?.count || 0;
+  const charged = sum['Total entries']?.charge || 0;
+  if (!total) throw new Error('no entries');
+
+  const first = sum['First date found']?.count, last = sum['Last date found']?.count;
+  document.getElementById('meta').textContent =
+    `Data: ${first} to ${last} · ${total.toLocaleString()} discrepancies logged`;
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="label">Discrepancies</div><div class="value">${total.toLocaleString()}</div></div>
+    <div class="stat warn"><div class="label">Charge-impacting*</div><div class="value">${charged}<small> / ${pct(charged, total)}%</small></div></div>
+    <div class="stat"><div class="label">Departments</div><div class="value">${sum['Departments represented']?.count ?? '—'}</div></div>
+    <div class="stat"><div class="label">Sites</div><div class="value">${sum['Sites represented']?.count ?? '—'}</div></div>
+    <div class="stat"><div class="label">Avg resolution</div><div class="value">${sum['Avg resolution (min)']?.count ?? '—'}<small> min</small></div></div>`;
+
+  const pairs = (S['Order pair'] || []).filter(p => p.count > 0);
+  const entered = (S['Entered by'] || []).filter(e => e.count > 0).sort((a, b) => b.count - a.count);
+  const depts = (S['Department'] || []).filter(d => d.count > 0).sort((a, b) => b.count - a.count);
+  const cats = (S['Category'] || []).filter(c => c.count > 0).sort((a, b) => b.count - a.count);
+
+  // Key findings: plain facts computed from the numbers
+  const f = [];
+  if (pairs[0]) f.push(`Most common pattern: <b>${esc(pairLabel(pairs[0].label))}</b>, ${pairs[0].count} times (${pct(pairs[0].count, total)}% of all discrepancies).`);
+  const top3 = pairs.slice(0, 3).reduce((s, p) => s + p.count, 0);
+  if (pairs.length >= 3) f.push(`The top 3 order patterns account for <b>${pct(top3, total)}%</b> of everything logged.`);
+  const proxy = entered.find(e => /proxy|appoint/i.test(e.label));
+  if (proxy) f.push(`<b>${pct(proxy.count, total)}%</b> of discrepant orders were entered by the appointment office (proxy), not the ordering provider.`);
+  if (depts.length >= 3) {
+    const d3 = depts.slice(0, 3).reduce((s, d) => s + d.count, 0);
+    f.push(`The top 3 of ${depts.length} ordering departments account for <b>${pct(d3, total)}%</b> of discrepancies.`);
+  }
+  if (cats[0]) f.push(`Most frequent category: <b>${esc(cats[0].label)}</b> (${pct(cats[0].count, total)}%).`);
+  f.push(`<b>${pct(charged, total)}%</b> of discrepancies were charge-impacting*.`);
+  document.getElementById('findings').innerHTML = f.map(x => `<li>${x}</li>`).join('');
+
+  topList('pairs', pairs, 'pairs-box', 'pairs-more', 'chartPairs', { horizontal: true, labelFn: pairLabel });
+  topList('dept', depts, 'dept-box', 'dept-more', 'chartDept', { horizontal: true, color: C.blue, title: 'By ordering department (masked)' });
+
+  const enteredColor = l => /proxy|appoint/i.test(l) ? C.amber : /provider/i.test(l) ? C.blue : /sched/i.test(l) ? C.teal : C.faint;
+  new Chart(document.getElementById('chartEntered'), {
+    type: 'doughnut',
+    data: { labels: entered.map(e => e.label), datasets: [{ data: entered.map(e => e.count), backgroundColor: entered.map(e => enteredColor(e.label)), borderColor: '#121826', borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: {
+      legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+      title: { display: true, text: 'Who entered the order', color: C.text, font: { size: 12 } } } }
+  });
+
+  const causes = (S['Root cause'] || []).filter(c => c.count > 0);
+  stackedBar('chartCause', causes, { color: C.blue, title: 'By root cause' });
+  stackedBar('chartCategory', cats, { title: 'By category', labelFn: l => l.length > 22 ? l.slice(0, 21) + '…' : l });
+
+  const charge = S['Charge impact'] || [];
+  const chargeColor = l => l === 'Yes' ? C.red : l === 'Unknown' ? C.amber : C.slate;
+  new Chart(document.getElementById('chartCharge'), {
+    type: 'doughnut',
+    data: { labels: charge.map(c => c.label), datasets: [{ data: charge.map(c => c.count), backgroundColor: charge.map(c => chargeColor(c.label)), borderColor: '#121826', borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: {
+      legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+      title: { display: true, text: 'By charge impact*', color: C.text, font: { size: 12 } } } }
+  });
+
+  const sites = (S['Site'] || []).filter(s => s.count > 0).sort((a, b) => b.count - a.count);
+  stackedBar('chartSite', sites, { color: C.amber, title: 'By site' });
+
+  const rt = (S['Avg resolution (min)'] || []).filter(r => typeof r.count === 'number');
+  simpleBar('chartResTime', rt.map(r => r.label.length > 22 ? r.label.slice(0, 21) + '…' : r.label), rt.map(r => r.count),
+            'Avg resolution time by category (min)', C.blue, { unit: 'Avg min', decimals: true });
+
+  const weeks = (S['Week starting'] || []);
+  new Chart(document.getElementById('chartTrend'), {
+    type: 'line',
+    data: { labels: weeks.map(w => w.label), datasets: [
+      { label: 'Found', data: weeks.map(w => w.count), borderColor: C.teal, backgroundColor: 'rgba(45,212,191,0.12)', fill: true, tension: 0.3, pointRadius: 3 },
+      { label: 'Charge-impacting*', data: weeks.map(w => w.charge ?? 0), borderColor: C.red, backgroundColor: 'transparent', tension: 0.3, pointRadius: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: {
+      legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+      title: { display: true, text: 'Found per week (last 12 weeks; latest week may be in progress)', color: C.text, font: { size: 12 } } },
+      scales: { x: { ticks: { font: { size: 10 } }, grid: { display: false } }, y: { ticks: { precision: 0 }, grid: { color: C.grid } } } }
+  });
+
+  const dow = (S['Day of week'] || []).filter(d => !['Sat', 'Sun'].includes(d.label) || d.count > 0);
+  simpleBar('chartDow', dow.map(d => d.label), dow.map(d => d.count), 'Found by day of week', C.amber);
+}
+
+fetch(SUMMARY_URL, { cache: 'no-store' })
+  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+  .then(t => render(toSections(parseCSV(t))))
+  .catch(() => {
+    document.getElementById('meta').textContent = '';
+    document.getElementById('content').innerHTML =
+      '<div class="panel"><div class="empty">Summary data isn\'t published yet.<br>Check back soon.</div></div>';
+  });
+</script>
+</body>
+</html>
