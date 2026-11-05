@@ -139,6 +139,27 @@
   .link-btn:hover { color: var(--teal); opacity: 1; }
   .breakdown-row { cursor: pointer; }
 
+  /* Collapsible panels */
+  details.panel > summary {
+    list-style: none; cursor: pointer; display: flex; align-items: center;
+    justify-content: space-between; gap: 12px; user-select: none;
+  }
+  details.panel > summary::-webkit-details-marker { display: none; }
+  details.panel > summary h2 { margin: 0; }
+  details.panel[open] > summary { margin-bottom: 16px; }
+  .toggle-label { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
+  .toggle-label::after { content: 'Show ▾'; }
+  details[open] .toggle-label::after { content: 'Hide ▴'; }
+  details.sub-collapse { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
+  details.sub-collapse > summary {
+    list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; user-select: none;
+  }
+  details.sub-collapse > summary::-webkit-details-marker { display: none; }
+  details.sub-collapse > summary:hover .toggle-label { color: var(--teal); }
+  details.sub-collapse[open] > summary { margin-bottom: 12px; }
+  details.panel > summary:hover .toggle-label { color: var(--teal); }
+
   @media (max-width: 720px) {
     .charts { grid-template-columns: 1fr; }
     body { padding: 20px 16px 40px; }
@@ -171,8 +192,8 @@
   <div class="toolbar" style="margin-bottom:8px;">
     <h2>Errors by department</h2>
     <select id="dept-limit" onchange="renderDept(getView())" style="padding:6px 9px;">
-      <option value="10">Top 10</option>
-      <option value="15" selected>Top 15</option>
+      <option value="10" selected>Top 10</option>
+      <option value="15">Top 15</option>
       <option value="25">Top 25</option>
       <option value="0">All</option>
     </select>
@@ -180,6 +201,7 @@
   <p class="hint">Highest-error departments first. Red = charge-impacting*. Click a bar to filter the whole page to that department.</p>
   <div class="chart-box" id="dept-box"><canvas id="chartDept" role="img" aria-label="Discrepancy count by ordering department, highest first"></canvas></div>
   <div class="source-status" id="dept-note"></div>
+  <div id="dept-more"></div>
 </div>
 
 <div class="panel" id="entered-panel">
@@ -196,7 +218,7 @@
     <h2>Phone numbers</h2>
     <input type="text" id="phone-search" placeholder="Search number…" oninput="renderPhones(getView())" style="width:200px;">
   </div>
-  <p class="hint">Most-used ordering numbers first (top 25; searching shows every match). Click a row to filter the whole page to that number.</p>
+  <p class="hint">Most-used ordering numbers first (top 10; searching shows every match). Click a row to filter the whole page to that number.</p>
   <div class="table-scroll" id="phoneWrap"></div>
 </div>
 
@@ -324,7 +346,7 @@
   <div class="toolbar" style="margin-bottom:8px;">
     <h2>Repeat offenders</h2>
   </div>
-  <p class="hint">Same department + same order pair, logged 3 or more times.</p>
+  <p class="hint">Same department + same order pair, logged 3 or more times. Top 10 shown.</p>
   <div class="table-scroll" id="repeatWrap"></div>
 </div>
 
@@ -706,6 +728,10 @@ function renderDept(view) {
     canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
   }
   const shown = limit && all.length > limit ? `Showing ${limit} of ${all.length} departments.` : `${all.length} department${all.length === 1 ? '' : 's'}.`;
+  const deptAllShown = !limit || limit >= all.length;
+  document.getElementById('dept-more').innerHTML = all.length > 10
+    ? `<button class="link-btn" style="margin-top:6px;" onclick="document.getElementById('dept-limit').value = '${deptAllShown ? '10' : '0'}'; renderDept(getView());">${deptAllShown ? 'Show top 10 only ▴' : `Show all ${all.length} ▾`}</button>`
+    : '';
   document.getElementById('dept-note').textContent = view.length
     ? `${shown} ${blank} entr${blank === 1 ? 'y' : 'ies'} with no department not counted.` : '';
 }
@@ -797,7 +823,8 @@ function renderPhones(view) {
   const q = document.getElementById('phone-search').value.replace(/\D/g, '');
   let sorted = Object.entries(groups).sort((a,b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
   if (q) sorted = sorted.filter(([v]) => v.replace(/\D/g, '').includes(q));
-  else sorted = sorted.slice(0, 25);
+  const phoneTotal = sorted.length;
+  if (!q && !phoneExpanded) sorted = sorted.slice(0, 10);
   phoneValues = sorted.map(s => s[0]);
   const top = obj => { const t = Object.entries(obj).sort((a,b) => b[1]-a[1])[0]; return t ? t[0] : '—'; };
 
@@ -809,9 +836,15 @@ function renderPhones(view) {
       <td class="num ${g.yes ? 'yes' : 'no'}">${g.yes}</td>
       <td>${escapeHtml(top(g.depts))}</td><td>${escapeHtml(top(g.by))}</td>
     </tr>`).join('')}
-  </table>` : `<div class="empty">${q ? 'No numbers match that search.' : 'No phone numbers in the current view.'}</div>`;
+  </table>${q ? '' : moreLink(phoneTotal, phoneExpanded, 'phoneExpanded = !phoneExpanded; renderPhones(getView());')}` : `<div class="empty">${q ? 'No numbers match that search.' : 'No phone numbers in the current view.'}</div>`;
 }
 
+let repeatsExpanded = false, phoneExpanded = false, exploreExpanded = false;
+// Builds the "Show all N / Show top 10 only" link under a list. flagName = the variable it flips.
+function moreLink(total, expanded, onclickJs) {
+  if (total <= 10) return '';
+  return `<button class="link-btn" style="margin-top:10px;" onclick="${onclickJs}">${expanded ? 'Show top 10 only ▴' : `Show all ${total} ▾`}</button>`;
+}
 function renderRepeats(view) {
   const wrap = document.getElementById('repeatWrap');
   const groups = {};
@@ -826,14 +859,16 @@ function renderRepeats(view) {
   });
   const rows = Object.values(groups).filter(g => g.count >= 3).sort((a,b) => b.count - a.count);
   if (!rows.length) { wrap.innerHTML = '<div class="empty">No repeats yet (needs 3+ of the same department + order pair).</div>'; return; }
+  const shownRows = repeatsExpanded ? rows : rows.slice(0, 10);
+  const more = moreLink(rows.length, repeatsExpanded, 'repeatsExpanded = !repeatsExpanded; renderRepeats(getView());');
   wrap.innerHTML = `<table>
     <tr><th>Department</th><th>Order pair</th><th>Count</th><th>Charge-impacting*</th><th>Most recent</th></tr>
-    ${rows.map(g => `<tr>
+    ${shownRows.map(g => `<tr>
       <td>${escapeHtml(g.dept)}</td><td>${escapeHtml(g.pair)}</td>
       <td class="num">${g.count}</td><td class="num ${g.yes ? 'yes' : 'no'}">${g.yes}</td>
       <td class="num">${escapeHtml(g.last)}</td>
     </tr>`).join('')}
-  </table>`;
+  </table>${more}`;
 }
 
 function setDatalist(id, values) {
@@ -976,14 +1011,14 @@ function renderExplore(view) {
   const total = view.length;
   wrap.innerHTML = `<table>
     <tr><th>${escapeHtml(gDim ? gDim.label : '')}</th><th>Count</th><th>% of shown</th><th>Charge-impacting*</th><th>Top category</th></tr>
-    ${sorted.map(([v, g], i) => `<tr class="breakdown-row" onclick="addFilter(groupBy, exploreValues[${i}])">
+    ${(exploreExpanded ? sorted : sorted.slice(0, 10)).map(([v, g], i) => `<tr class="breakdown-row" onclick="addFilter(groupBy, exploreValues[${i}])">
       <td>${escapeHtml(v)}</td>
       <td class="num">${g.count}</td>
       <td class="num">${Math.round(g.count / total * 100)}%</td>
       <td class="num ${g.yes ? 'yes' : 'no'}">${g.yes} (${Math.round(g.yes / g.count * 100)}%)</td>
       <td>${escapeHtml(topOf(Object.entries(g.cats).flatMap(([c, n]) => Array(n).fill(c))) || '—')}</td>
     </tr>`).join('')}
-  </table>`;
+  </table>${moreLink(sorted.length, exploreExpanded, 'exploreExpanded = !exploreExpanded; render();')}`;
   exploreValues = sorted.map(s => s[0]);
 }
 let exploreValues = [];
@@ -1200,6 +1235,11 @@ function parseCSVLine(line) {
 }
 
 loadData();
+
+// Charts drawn inside a closed panel have no size; redraw when a panel is opened.
+document.querySelectorAll('details.panel').forEach(d =>
+  d.addEventListener('toggle', () => { if (d.open) render(); })
+);
 
 const savedDropboxUrl = localStorage.getItem('dropbox-source-url');
 if (savedDropboxUrl) {
