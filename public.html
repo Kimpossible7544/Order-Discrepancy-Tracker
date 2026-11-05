@@ -26,7 +26,7 @@
   .eyebrow::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 8px var(--teal); }
   h1 { font-size: 26px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
   .sub { color: var(--text-dim); font-size: 14px; margin: 0 0 6px; line-height: 1.5; }
-  .meta { color: var(--text-faint); font-size: 12px; font-family: var(--mono); margin: 0 0 26px; }
+  .meta { color: var(--text-faint); font-size: 12px; font-family: var(--mono); margin: 0 0 26px; min-height: 16px; }
 
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 10px; }
   .stat { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border);
@@ -50,6 +50,19 @@
     font-family: var(--sans); text-decoration: underline; cursor: pointer; }
   .link-btn:hover { color: var(--teal); }
   .empty { color: var(--text-dim); font-size: 14px; padding: 40px 20px; text-align: center; line-height: 1.6; }
+
+  .lock { max-width: 440px; margin: 10px auto 30px; text-align: center; }
+  .lock p { color: var(--text-dim); font-size: 14px; line-height: 1.55; margin: 0 0 16px; }
+  .lock form { display: flex; gap: 8px; }
+  .lock input { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 10px 12px; font-size: 14px; font-family: var(--sans); }
+  .lock input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(45,212,191,0.12); }
+  .lock button { background: var(--teal); color: #06201c; border: none; border-radius: 7px; padding: 10px 18px;
+    font-size: 14px; font-weight: 600; cursor: pointer; font-family: var(--sans); }
+  .lock button:disabled { opacity: .5; cursor: default; }
+  .lock .msg { font-size: 13px; margin-top: 12px; min-height: 18px; color: var(--text-dim); }
+  .lock .msg.err { color: var(--red); }
+
   footer { color: var(--text-faint); font-size: 12px; line-height: 1.6; margin-top: 28px; border-top: 1px solid var(--border); padding-top: 16px; }
   @media (max-width: 720px) {
     .charts { grid-template-columns: 1fr; }
@@ -63,9 +76,18 @@
 <p class="eyebrow">Radiology IT · Order quality analysis</p>
 <h1>Radiology order discrepancy patterns</h1>
 <p class="sub">Order and protocol discrepancies caught during pre-appointment order review across 11 radiology sites, tracked to find where errors start and stop them upstream.</p>
-<p class="meta" id="meta">Loading…</p>
+<p class="meta" id="meta"></p>
 
-<div id="content">
+<div class="panel lock" id="lock">
+  <p>The summary data on this page is encrypted. Enter the passcode you were given to view it.</p>
+  <form id="lock-form">
+    <input type="password" id="passcode" placeholder="Passcode" autocomplete="current-password" aria-label="Passcode">
+    <button type="submit" id="unlock" disabled>View</button>
+  </form>
+  <div class="msg" id="lock-msg">Loading…</div>
+</div>
+
+<div id="content" style="display:none;">
   <div class="stats" id="stats"></div>
   <p class="note">* Charge impact is based on whether the corrected exam was a significant change from the original order. It may or may not reflect final billing. Dates are when the discrepancy was found, not the exam date.</p>
 
@@ -117,10 +139,10 @@
 
 </div>
 <script>
-/* Where the scrubbed summary comes from: a CSV export of the workbook's "Public" tab
-   (columns Section, Label, Count, ChargeImpacting). Put a public_summary.csv next to
-   this page, or replace this with a direct-download link to that CSV. */
-const SUMMARY_URL = 'public_summary.csv';
+/* The scrubbed summary (CSV export of the workbook's "Public" tab), encrypted with
+   encrypt_tool.html: AES-256-GCM, key derived from the passcode with PBKDF2-SHA256.
+   Without the passcode the file is unreadable. */
+const SUMMARY_URL = 'public_summary.enc';
 
 const C = { tick: '#8b96ac', grid: '#232d40', text: '#e8ecf3', teal: '#2dd4bf', amber: '#f5a623',
             red: '#f0574a', blue: '#4a90d9', slate: '#3a4256', faint: '#5b6478' };
@@ -303,14 +325,55 @@ function render(S) {
   simpleBar('chartDow', dow.map(d => d.label), dow.map(d => d.count), 'Found by day of week', C.amber);
 }
 
+/* ---------- Passcode + decryption ---------- */
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+async function decryptSummary(pkg, pass) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: unb64(pkg.salt), iterations: pkg.iter, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(pkg.iv) }, key, unb64(pkg.ct));
+  return new TextDecoder().decode(plain);
+}
+
+function lockMsg(m, err) {
+  const el = document.getElementById('lock-msg');
+  el.textContent = m;
+  el.className = 'msg' + (err ? ' err' : '');
+}
+
+let pkg = null;
+
 fetch(SUMMARY_URL, { cache: 'no-store' })
-  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-  .then(t => render(toSections(parseCSV(t))))
+  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(j => {
+    pkg = j;
+    lockMsg('');
+    document.getElementById('unlock').disabled = false;
+    document.getElementById('passcode').focus();
+  })
   .catch(() => {
-    document.getElementById('meta').textContent = '';
-    document.getElementById('content').innerHTML =
-      '<div class="panel"><div class="empty">Summary data isn\'t published yet.<br>Check back soon.</div></div>';
+    document.getElementById('lock').innerHTML = '<div class="empty">Summary data isn\'t published yet.<br>Check back soon.</div>';
   });
+
+document.getElementById('lock-form').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  if (!pkg) return;
+  const pass = document.getElementById('passcode').value;
+  if (!pass) return lockMsg('Enter the passcode.', true);
+  const btn = document.getElementById('unlock');
+  btn.disabled = true;
+  lockMsg('Unlocking…');
+  let text;
+  try { text = await decryptSummary(pkg, pass); }
+  catch (e) { btn.disabled = false; return lockMsg("That passcode didn't work.", true); }
+  document.getElementById('lock').style.display = 'none';
+  document.getElementById('content').style.display = '';
+  try { render(toSections(parseCSV(text))); }
+  catch (e) {
+    document.getElementById('content').innerHTML = '<div class="panel"><div class="empty">The summary file couldn\'t be read.</div></div>';
+  }
+});
 </script>
 </body>
 </html>
