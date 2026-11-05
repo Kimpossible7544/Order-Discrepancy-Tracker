@@ -43,7 +43,8 @@
   h1 { font-size: 26px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
   .sub { color: var(--text-dim); font-size: 14px; margin: 0 0 28px; }
 
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 28px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 10px; }
+  .stats-note { font-size: 11.5px; color: var(--text-dim); margin: 0 0 28px; line-height: 1.5; }
   .stat {
     background: linear-gradient(180deg, var(--panel-2), var(--panel));
     border: 1px solid var(--border); border-left: 3px solid var(--teal-dim);
@@ -164,6 +165,7 @@
 </div>
 
 <div class="stats" id="stats"></div>
+<p class="stats-note">* Charge impact is based on whether the corrected exam was a significant change from the original order. It may or may not reflect final billing.</p>
 
 <div class="panel" id="dept-panel">
   <div class="toolbar" style="margin-bottom:8px;">
@@ -175,7 +177,7 @@
       <option value="0">All</option>
     </select>
   </div>
-  <p class="hint">Highest-error departments first. Red = charge-impacting. Click a bar to filter the whole page to that department.</p>
+  <p class="hint">Highest-error departments first. Red = charge-impacting*. Click a bar to filter the whole page to that department.</p>
   <div class="chart-box" id="dept-box"><canvas id="chartDept" role="img" aria-label="Discrepancy count by ordering department, highest first"></canvas></div>
   <div class="source-status" id="dept-note"></div>
 </div>
@@ -388,7 +390,7 @@ function valueOf(dim, e) {
   return v || '(blank)';
 }
 
-/* Normalizes phone numbers so 507-284-1234, (507) 284-1234 and 5072841234
+/* Normalize phone numbers so formats like (507) 284-1234 and 5072841234
    group together. Anything not 10 digits (e.g. internal extensions) groups by its digits. */
 function formatPhone(p) {
   const s = String(p ?? '').trim();
@@ -731,7 +733,7 @@ function renderEntered(view) {
 
   const wrap = document.getElementById('enteredWrap');
   wrap.innerHTML = sorted.length ? `<table>
-    <tr><th>Entered by</th><th>Count</th><th>% of shown</th><th>Charge-impacting</th></tr>
+    <tr><th>Entered by</th><th>Count</th><th>% of shown</th><th>Charge-impacting*</th></tr>
     ${sorted.map(([v, g], i) => `<tr class="breakdown-row" onclick="addFilter('orderedBy', enteredValues[${i}])">
       <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${enteredColor(v)};margin-right:8px;"></span>${escapeHtml(v)}</td>
       <td class="num">${g.count}</td><td class="num">${pct(g.count, view.length)}%</td>
@@ -801,7 +803,7 @@ function renderPhones(view) {
 
   const wrap = document.getElementById('phoneWrap');
   wrap.innerHTML = sorted.length ? `<table>
-    <tr><th>Phone</th><th>Count</th><th>% of shown</th><th>Charge-impacting</th><th>Top department</th><th>Usually entered by</th></tr>
+    <tr><th>Phone</th><th>Count</th><th>% of shown</th><th>Charge-impacting*</th><th>Top department</th><th>Usually entered by</th></tr>
     ${sorted.map(([v, g], i) => `<tr class="breakdown-row" onclick="addFilter('phone', phoneValues[${i}])">
       <td class="num">${escapeHtml(v)}</td><td class="num">${g.count}</td><td class="num">${pct(g.count, view.length)}%</td>
       <td class="num ${g.yes ? 'yes' : 'no'}">${g.yes}</td>
@@ -825,7 +827,7 @@ function renderRepeats(view) {
   const rows = Object.values(groups).filter(g => g.count >= 3).sort((a,b) => b.count - a.count);
   if (!rows.length) { wrap.innerHTML = '<div class="empty">No repeats yet (needs 3+ of the same department + order pair).</div>'; return; }
   wrap.innerHTML = `<table>
-    <tr><th>Department</th><th>Order pair</th><th>Count</th><th>Charge-impacting</th><th>Most recent</th></tr>
+    <tr><th>Department</th><th>Order pair</th><th>Count</th><th>Charge-impacting*</th><th>Most recent</th></tr>
     ${rows.map(g => `<tr>
       <td>${escapeHtml(g.dept)}</td><td>${escapeHtml(g.pair)}</td>
       <td class="num">${g.count}</td><td class="num ${g.yes ? 'yes' : 'no'}">${g.yes}</td>
@@ -867,7 +869,7 @@ function renderStats(view) {
 
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="label">Total logged</div><div class="value">${total}</div></div>
-    <div class="stat warn"><div class="label">Charge-impacting</div><div class="value">${chargeImpact}<span style="font-size:14px;color:var(--text-faint);"> / ${chargePct}%</span></div></div>
+    <div class="stat warn"><div class="label">Charge-impacting*</div><div class="value">${chargeImpact}<span style="font-size:14px;color:var(--text-faint);"> / ${chargePct}%</span></div></div>
     ${rateCard}
     <div class="stat"><div class="label">Sites represented</div><div class="value">${sites}</div></div>
     <div class="stat"><div class="label">Avg resolution</div><div class="value">${avgTime ?? '—'}${avgTime ? '<span style="font-size:14px;color:var(--text-faint);"> min</span>' : ''}</div></div>
@@ -973,7 +975,7 @@ function renderExplore(view) {
   if (!sorted.length) { wrap.innerHTML = '<div class="empty">No entries match the current filters.</div>'; return; }
   const total = view.length;
   wrap.innerHTML = `<table>
-    <tr><th>${escapeHtml(gDim ? gDim.label : '')}</th><th>Count</th><th>% of shown</th><th>Charge-impacting</th><th>Top category</th></tr>
+    <tr><th>${escapeHtml(gDim ? gDim.label : '')}</th><th>Count</th><th>% of shown</th><th>Charge-impacting*</th><th>Top category</th></tr>
     ${sorted.map(([v, g], i) => `<tr class="breakdown-row" onclick="addFilter(groupBy, exploreValues[${i}])">
       <td>${escapeHtml(v)}</td>
       <td class="num">${g.count}</td>
@@ -1009,7 +1011,7 @@ function renderTable(view) {
     </tr>`;
   }).join('');
   wrap.innerHTML = `<table>
-    <tr><th>Date</th><th>Site</th><th>Order placed</th><th>Corrected to</th><th>Dept</th><th>Phone</th><th>Category</th><th>Charge</th><th>Root cause</th><th>Entered by</th><th>Time</th><th>Notes</th><th></th></tr>
+    <tr><th>Date</th><th>Site</th><th>Order placed</th><th>Corrected to</th><th>Dept</th><th>Phone</th><th>Category</th><th>Charge*</th><th>Root cause</th><th>Entered by</th><th>Time</th><th>Notes</th><th></th></tr>
     ${rows}
   </table>`;
 }
@@ -1105,7 +1107,7 @@ function renderCharts(view) {
     data: { labels: ['Yes','No','Unknown'], datasets: [{ data: [chargeCounts.Yes, chargeCounts.No, chargeCounts.Unknown], backgroundColor: ['#f0574a','#3a4256','#f5a623'], borderColor: '#121826', borderWidth: 2 }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: {
       legend: { position: 'bottom', labels: { color: tickColor, font: {size: 11, ...fontOpts}, boxWidth: 10, padding: 12 } },
-      title: { display: true, text: 'By charge impact', color: textColor, font: {size: 12, ...fontOpts} } } }
+      title: { display: true, text: 'By charge impact*', color: textColor, font: {size: 12, ...fontOpts} } } }
   });
 
   chartCause = new Chart(document.getElementById('chartCause'), {
