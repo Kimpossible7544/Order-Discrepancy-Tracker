@@ -91,6 +91,12 @@
   <div class="stats" id="stats"></div>
   <p class="note">* Charge impact is based on whether the corrected exam was a significant change from the original order. It may or may not reflect final billing. Dates are when the discrepancy was found, not the exam date.</p>
 
+  <div class="panel" id="impact-panel" style="display:none;">
+    <h2>Estimated impact</h2>
+    <p class="hint">Charge-impacting corrections only, valued at ballpark Medicare rates. Estimates, not final billing.</p>
+    <div class="stats" id="impact-stats" style="margin-bottom:0;"></div>
+  </div>
+
   <div class="panel">
     <h2>Key findings</h2>
     <ul class="findings" id="findings"></ul>
@@ -255,6 +261,22 @@ function render(S) {
     <div class="stat"><div class="label">Departments</div><div class="value">${sum['Departments represented']?.count ?? '—'}</div></div>
     <div class="stat"><div class="label">Sites</div><div class="value">${sum['Sites represented']?.count ?? '—'}</div></div>
     <div class="stat"><div class="label">Avg resolution</div><div class="value">${sum['Avg resolution (min)']?.count ?? '—'}<small> min</small></div></div>`;
+
+  // Estimated impact (only shown when the export includes the Impact section)
+  const imp = Object.fromEntries((S['Impact'] || []).map(r => [r.label, r]));
+  const mayo = imp['Saved Mayo (est $)'], patients = imp['Helped patients (est $)'];
+  if (mayo && patients) {
+    const days = (first && last) ? (new Date(last) - new Date(first)) / 864e5 + 1 : 0;
+    const money = n => '$' + Math.round(n).toLocaleString();
+    const perYear = n => days > 0 ? `<small> · ~${money(n / days * 365)}/yr</small>` : '';
+    const card = (label, r, what) => `<div class="stat"><div class="label">${label}</div>
+      <div class="value">${money(r.count)}${perYear(r.count)}</div>
+      <div class="label" style="margin:6px 0 0;">${r.charge ?? 0} ${what}</div></div>`;
+    document.getElementById('impact-stats').innerHTML =
+      card('Saved Mayo (missed charges caught)', mayo, 'under-billed orders fixed') +
+      card('Helped patients (overbilling prevented)', patients, 'over-billed orders fixed');
+    document.getElementById('impact-panel').style.display = '';
+  }
 
   const pairs = (S['Order pair'] || []).filter(p => p.count > 0);
   const entered = (S['Entered by'] || []).filter(e => e.count > 0).sort((a, b) => b.count - a.count);
