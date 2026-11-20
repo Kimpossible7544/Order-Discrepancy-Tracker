@@ -188,6 +188,12 @@
 <div class="stats" id="stats"></div>
 <p class="stats-note">* Charge impact is based on whether the corrected exam was a significant change from the original order. It may or may not reflect final billing.</p>
 
+<div class="panel" id="value-panel">
+  <h2>Estimated impact</h2>
+  <div class="stats" id="value-stats" style="margin-bottom:10px;"></div>
+  <p class="hint" id="value-note" style="margin-bottom:0;"></p>
+</div>
+
 <div class="panel" id="dept-panel">
   <div class="toolbar" style="margin-bottom:8px;">
     <h2>Errors by department</h2>
@@ -590,6 +596,23 @@ async function loadFromDropbox(silent) {
       }
     }
 
+    // Optional "Value Map" sheet: $ rates in B5:B7, pattern -> direction from row 11 down
+    valueMap = {};
+    valueRates = Object.assign({}, DEFAULT_RATES);
+    const vmSheet = wb.Sheets['Value Map'];
+    if (vmSheet) {
+      const vm = XLSX.utils.sheet_to_json(vmSheet, { header: 1, raw: true, defval: '', blankrows: true });
+      [['Upgrade', 4], ['Downgrade', 5], ['Combine', 6]].forEach(([k, i]) => {
+        const n = Number((vm[i] || [])[1]);
+        if (n > 0) valueRates[k] = n;
+      });
+      for (let i = 10; i < vm.length; i++) {
+        const p = normPattern((vm[i] || [])[0]);
+        const d = String((vm[i] || [])[1] ?? '').trim();
+        if (p && d) valueMap[p] = d;
+      }
+    }
+
     localStorage.setItem('dropbox-source-url', rawUrl);
     render();
     const phoneNote = phoneHeader ? ` Phone column: "${phoneHeader}".` : ' No phone column found.';
@@ -663,6 +686,7 @@ function escapeHtml(s) {
 function render() {
   const view = getView();
   renderStats(view);
+  renderValue(view);
   renderDept(view);
   renderEntered(view);
   renderPhones(view);
@@ -910,6 +934,41 @@ function renderStats(view) {
     <div class="stat"><div class="label">Avg resolution</div><div class="value">${avgTime ?? '—'}${avgTime ? '<span style="font-size:14px;color:var(--text-faint);"> min</span>' : ''}</div></div>
     <div class="stat"><div class="label">Top category</div><div class="value small">${escapeHtml(topCat || '—')}</div></div>
   `;
+}
+
+/* ---------- Estimated impact ($) ---------- */
+const DEFAULT_RATES = { Upgrade: 7.5, Downgrade: 7.5, Combine: 20 };
+let valueRates = Object.assign({}, DEFAULT_RATES);
+let valueMap = {}; // normalized "order -> corrected" => direction, from the workbook's Value Map tab
+function normPattern(s) { return String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+function billingDirection(e) {
+  const d = String((e.extra || {})['Billing Direction'] ?? '').trim();
+  if (d && d !== 'Unmapped') return d;
+  if (!e.order || !e.corrected) return '';
+  return valueMap[normPattern(`${e.order} -> ${e.corrected}`)] || 'Unmapped';
+}
+function money(n) { return '$' + Math.round(n).toLocaleString(); }
+
+function renderValue(view) {
+  const n = { Upgrade: 0, Downgrade: 0, Combine: 0, Unmapped: 0 };
+  view.forEach(e => {
+    if (e.charge !== 'Yes') return;
+    const d = billingDirection(e);
+    if (n[d] !== undefined) n[d]++;
+  });
+  const mayo = n.Upgrade * valueRates.Upgrade;
+  const patients = n.Downgrade * valueRates.Downgrade + n.Combine * valueRates.Combine;
+
+  const dates = view.map(e => e.date).filter(Boolean).sort();
+  const days = dates.length ? (new Date(dates[dates.length - 1]) - new Date(dates[0])) / 864e5 + 1 : 0;
+  const perYear = x => days ? ` <span style="font-size:13px;color:var(--text-faint);">· ~${money(x / days * 365)}/yr</span>` : '';
+
+  document.getElementById('value-stats').innerHTML = `
+    <div class="stat"><div class="label">Saved Mayo (missed charges caught)</div><div class="value">${money(mayo)}${perYear(mayo)}</div><div class="label" style="margin:6px 0 0;">${n.Upgrade} under-billed orders fixed</div></div>
+    <div class="stat"><div class="label">Helped patients (overbilling prevented)</div><div class="value">${money(patients)}${perYear(patients)}</div><div class="label" style="margin:6px 0 0;">${n.Downgrade + n.Combine} over-billed orders fixed</div></div>`;
+  document.getElementById('value-note').textContent =
+    `Ballpark at Medicare rates ($${valueRates.Upgrade}/upgrade, $${valueRates.Downgrade}/downgrade, $${valueRates.Combine}/L+R combined). Charge-impacting entries only.` +
+    (n.Unmapped ? ` ${n.Unmapped} not yet categorized on the Value Map tab.` : '');
 }
 
 function topOf(arr) {
